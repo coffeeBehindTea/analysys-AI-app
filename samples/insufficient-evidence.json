@@ -1,0 +1,5 @@
+{
+    "robot_id": "sample-robot-002",
+    "symptom": "机器人在任务过程中停止移动",
+    "log_excerpt": "INFO mission_controller: movement command received"
+}

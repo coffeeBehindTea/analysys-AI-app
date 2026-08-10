@@ -1,0 +1,5 @@
+{
+    "robot_id": "sample-robot-003",
+    "symptom": "机器人执行转向指令后没有产生预期动作",
+    "log_excerpt": "WARN motion_controller: steering response pending"
+}

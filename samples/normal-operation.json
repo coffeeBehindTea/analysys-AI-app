@@ -1,0 +1,5 @@
+{
+    "robot_id": "sample-robot-001",
+    "symptom": "例行巡检时未发现明显运行异常",
+    "log_excerpt": "INFO motion_controller: command completed; INFO wheel_feedback: status available"
+}

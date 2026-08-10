@@ -1,0 +1,55 @@
+第 1 周学习计划：LLM 服务工程与流式交互
+✅ 本周核心目标 (OKRs)
+搭建可复现的 FastAPI 项目，完成健康检查、配置管理和机器人故障摘要 API，服务可本地一键启动。
+使用 OpenAI 兼容接口完成异步调用与 SSE 流式输出，理解请求、增量事件、完成事件和异常事件的边界。
+用 pytest 覆盖正常、参数校验、流式输出和上游失败场景，交付完整 README、样例请求和工程复盘。
+📅 日程安排
+Day 1-2：工程基线与 API 骨架
+目标： 不重复学习 Python 基础，直接完成现代 AI 服务的最小工程骨架，并验证异步 API 设计能力。
+
+任务 1： 建立可复现开发环境
+
+描述：在 week-01/code/ 创建虚拟环境、requirements.txt、.gitignore、.env.example 和 README。使用 Python 3.11+，安装 FastAPI、uvicorn、openai、pydantic-settings、pytest、pytest-asyncio、httpx 和 sse-starlette。环境变量统一命名为 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL；只提交 .env.example，不得提交真实密钥。
+产出：可运行的 python -m uvicorn main:app --reload、GET /health 响应截图或 curl 输出，以及 docs/baseline.md（Python 版本、依赖、启动命令）。
+任务 2： 完成分层 API 与能力校准
+
+描述：建立 app/routers/、app/schemas/、app/services/、app/utils/ 目录。实现 GET /health 和 POST /api/v1/triage；请求至少包含 robot_id、symptom、log_excerpt，响应包含 request_id、summary 和 recommended_actions。LLM 客户端不得在模块导入时创建，须通过工厂函数或依赖注入获得，方便替换与测试。
+产出：项目目录树、Pydantic 请求/响应模型、可在 Swagger 中验证的非流式接口。
+Day 3-4：异步 LLM 调用与 SSE 协议
+目标： 将真实 LLM 能力接入服务，并明确客户端如何消费和处理流式事件。
+
+任务 3： 实现故障摘要服务
+
+描述：在 services/ 编写异步 LLM 服务。提示词只要求根据输入日志说明已知症状、即时排查动作和需要补充的信息；不允许虚构传感器读数、手册引用或根因结论。为超时、无效响应和未配置密钥定义清晰的应用错误。
+产出：POST /api/v1/triage 可使用模拟客户端完成测试；配置真实密钥时，可对一份脱敏日志进行手动冒烟验证。
+任务 4： 实现并验证 SSE 流式接口
+
+描述：新增 POST /api/v1/triage/stream。至少定义 meta、delta、done、error 四种事件：meta 返回 request ID，delta 只传文本增量，done 表示正常结束，error 返回可读错误码。先用 curl 或一个最小 HTML 页面验证事件顺序，不要求本周完成正式前端。
+产出：流式路由、事件协议说明和一份成功/失败的事件日志。
+周三检查点： 服务可启动；/health、非流式接口和至少 3 个自动化测试通过。若异步、依赖注入或 Pydantic 校验出现问题，先修正骨架，再继续流式功能。
+
+Day 5-7：可靠性、测试与交付
+目标： 将“能调用”提升为“可验证、可维护”，为第 2 周 RAG 接入保留清晰边界。
+
+任务 5： 编写测试与故障样本
+
+描述：准备 3 份脱敏的机器人场景样本：正常日志、信息不足日志和上游服务失败场景。使用 mock/假客户端替代真实 LLM；测试不得依赖 API Key 或网络。至少覆盖健康检查、请求字段校验、非流式成功、SSE 事件顺序、上游超时和密钥缺失。
+产出：不少于 6 个 tests/test_*.py 用例，以及 docs/test-report.md 中记录的 python -m pytest tests/ -v 结果。
+任务 6： 文档化与自我评审
+
+描述：补全 README：安装、配置、启动、curl 样例、测试命令、接口说明和已知限制。新增 docs/architecture.md，说明 router-schema-service-config 的职责、SSE 事件流和第 2 周将接入 RAG 的位置。对照本周验收项做一次自查，删除调试代码和密钥痕迹。
+产出：完整提交物、架构说明和一段不超过 300 字的工程复盘，说明本周最难的问题及解决方式。
+💻 本周实战作业
+作业描述
+完成 Robot Incident Triage API。它接收脱敏的机器人故障描述和日志摘要，通过 LLM 输出谨慎的排查建议，并同时提供非流式与流式接口。本周只解决服务工程和交互协议，不接入 RAG、Agent、真实遥测或前端产品化功能。
+
+功能要求
+提供 GET /health、POST /api/v1/triage 和 POST /api/v1/triage/stream 三个端点。
+对缺失字段、过长日志、未配置密钥、上游超时或无效响应返回一致、可读且不泄露密钥的错误。
+流式接口按 meta → delta* → done 或 meta → error 输出；每次请求具有可追踪的 request_id。
+提供至少 3 份脱敏输入样例；模型不确定时必须要求补充信息，不得编造证据。
+技术要求
+使用 Python 3.11+、FastAPI、Pydantic v2、AsyncOpenAI/OpenAI 兼容客户端和 SSE；路由、Schema、服务、配置分层组织。
+所有公开函数写类型标注；禁止把密钥、模型地址或客户端实例硬编码在业务逻辑中；避免裸 except。
+使用 pytest、httpx 和 mock 编写不少于 6 个自动化测试；测试必须在无网络、无真实 API Key 的环境中通过。
+运行 python -m pytest tests/ -v 和 python -m uvicorn main:app --reload 后再提交。

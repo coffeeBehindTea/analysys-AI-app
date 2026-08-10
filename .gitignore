@@ -1,0 +1,23 @@
+# 真实环境变量和密钥
+.env
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 测试及工具缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 编辑器文件
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db

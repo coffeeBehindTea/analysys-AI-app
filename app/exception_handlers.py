@@ -14,10 +14,18 @@ from starlette import status
 
 from app.errors import (
     ApplicationError,
+    DocumentNotFoundError,
+    DocumentValidationError,
+    DuplicateDocumentError,
+    EmbeddingConfigurationError,
+    EmbeddingTimeoutError,
+    EmbeddingUpstreamError,
+    InvalidEmbeddingResponseError,
     InvalidLLMResponseError,
     LLMConfigurationError,
     LLMTimeoutError,
     LLMUpstreamError,
+    VectorStoreError,
 )
 from app.schemas.error import ErrorDetail, ErrorResponse
 
@@ -33,6 +41,7 @@ ErrorMetadata = tuple[int, str, str]
 
 # 将业务层的应用异常转换为 HTTP 层可以理解的信息。
 ERROR_METADATA: dict[type[ApplicationError], ErrorMetadata] = {
+    # ---------- LLM 错误 ----------
     LLMConfigurationError: (
         status.HTTP_503_SERVICE_UNAVAILABLE,
         "llm_configuration_error",
@@ -52,6 +61,61 @@ ERROR_METADATA: dict[type[ApplicationError], ErrorMetadata] = {
         status.HTTP_502_BAD_GATEWAY,
         "invalid_llm_response",
         "LLM 返回了无法处理的响应",
+    ),
+
+    # ---------- Embedding 错误 ----------
+    EmbeddingConfigurationError: (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "embedding_configuration_error",
+        "Embedding 服务未正确配置",
+    ),
+    EmbeddingTimeoutError: (
+        status.HTTP_504_GATEWAY_TIMEOUT,
+        "embedding_timeout",
+        "Embedding 服务响应超时",
+    ),
+    EmbeddingUpstreamError: (
+        status.HTTP_502_BAD_GATEWAY,
+        "embedding_upstream_error",
+        "Embedding 上游服务暂时不可用",
+    ),
+    InvalidEmbeddingResponseError: (
+        status.HTTP_502_BAD_GATEWAY,
+        "invalid_embedding_response",
+        "Embedding 服务返回了无法处理的响应",
+    ),
+
+    # ---------- 知识库文档错误 ----------
+
+    # 文件类型、大小、文件名、内容或解析结果无效。
+    DocumentValidationError: (
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "document_validation_error",
+        "上传文档不符合摄取要求",
+    ),
+
+    # 相同文件内容已经存在。
+    #
+    # 409 Conflict 表示请求本身合法，
+    # 但与服务器当前状态冲突。
+    DuplicateDocumentError: (
+        status.HTTP_409_CONFLICT,
+        "duplicate_document",
+        "相同文档已经存在于知识库中",
+    ),
+
+    # 指定 document_id 没有对应文档。
+    DocumentNotFoundError: (
+        status.HTTP_404_NOT_FOUND,
+        "document_not_found",
+        "知识库文档不存在",
+    ),
+
+    # ChromaDB 暂时无法完成读写操作。
+    VectorStoreError: (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "vector_store_error",
+        "知识库暂时不可用",
     ),
 }
 

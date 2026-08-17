@@ -23,3 +23,34 @@ class LLMUpstreamError(ApplicationError):
 
 class InvalidLLMResponseError(ApplicationError):
     """LLM 返回的内容为空或不符合约定格式。"""
+
+class EmbeddingConfigurationError(ApplicationError):
+    """Embedding 模型配置缺失或无效。"""
+
+
+class EmbeddingTimeoutError(ApplicationError):
+    """Embedding 请求超时。"""
+
+
+class EmbeddingUpstreamError(ApplicationError):
+    """Embedding 上游服务不可用或返回错误状态。"""
+
+
+class InvalidEmbeddingResponseError(ApplicationError):
+    """Embedding 上游响应不完整或向量不符合约定。"""
+
+
+class DuplicateDocumentError(ApplicationError):
+    """相同文件内容已经存在于知识库中。"""
+
+
+class VectorStoreError(ApplicationError):
+    """向量数据库读写失败或返回了无效数据。"""
+
+
+class DocumentValidationError(ApplicationError):
+    """上传文档的类型、大小或内容不符合摄取要求。"""
+
+
+class DocumentNotFoundError(ApplicationError):
+    """指定的知识库文档不存在。"""

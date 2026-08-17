@@ -90,7 +90,8 @@ No broken requirements found.
 在项目根目录执行：
 
 ```powershell
-cd D:\analysys\week-01code
+# 进入克隆后的项目根目录；不要写死开发者本机绝对路径。
+Set-Location <repository-directory>
 conda activate analysys
 python -m uvicorn main:app --reload
 ```

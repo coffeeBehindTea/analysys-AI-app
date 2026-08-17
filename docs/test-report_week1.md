@@ -258,4 +258,3 @@ TriageService
 ```text
 21 passed
 ```
-

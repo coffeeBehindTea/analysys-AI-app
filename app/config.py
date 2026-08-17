@@ -1,37 +1,151 @@
 """集中读取和校验应用配置。"""
 
-# lru_cache 会缓存无参数函数的返回值，避免每次请求都重新读取 .env。
+# lru_cache 缓存无参数函数的返回值，
+# 避免每次请求都重新读取 .env。
 from functools import lru_cache
 
-# HttpUrl 校验 HTTP/HTTPS 地址；SecretStr 避免密钥在打印时直接显示。
-from pydantic import HttpUrl, SecretStr
+# Path 表示文件系统路径。
+from pathlib import Path
 
-# BaseSettings 是专门读取环境变量的 Pydantic 模型基类；
-# SettingsConfigDict 用于配置 .env、编码、大小写等读取规则。
-from pydantic_settings import BaseSettings, SettingsConfigDict
+# Self 表示当前类 Settings 自身的类型。
+from typing import Self
+
+# Field 为字段增加数值、长度等约束；
+# HttpUrl 校验 HTTP/HTTPS 地址；
+# SecretStr 降低密钥被意外打印的风险；
+# model_validator 校验多个字段之间的关系。
+from pydantic import (
+    Field,
+    HttpUrl,
+    SecretStr,
+    model_validator,
+)
+
+# BaseSettings 从环境变量和 .env 中读取配置；
+# SettingsConfigDict 配置其读取行为。
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+)
 
 
 class Settings(BaseSettings):
-    """应用支持的 LLM 环境变量及其类型。"""
+    """集中读取 LLM 与 Embedding 服务配置。"""
 
-    # model_config 是 Pydantic v2 的模型级配置。
     model_config = SettingsConfigDict(
-        # Settings() 创建时自动读取项目工作目录下的 .env。
         env_file=".env",
-        # 使用 UTF-8 解析 .env 文件。
         env_file_encoding="utf-8",
-        # 环境变量名不区分大小写，llm_model 可匹配 LLM_MODEL。
         case_sensitive=False,
-        # 自动删除字符串配置首尾空格。
         str_strip_whitespace=True,
-        # .env 中存在当前模型未声明的其他配置时不报错。
         extra="ignore",
     )
 
-    # None 表示配置可以在应用启动时缺失，在真正调用 LLM 时再校验。
+    # ---------- 生成式 LLM 配置 ----------
+    #
+    # 用于故障摘要、建议生成等文本生成任务。
     llm_api_key: SecretStr | None = None
     llm_base_url: HttpUrl | None = None
     llm_model: str | None = None
+
+    # ---------- Embedding 配置 ----------
+    #
+    # Embedding 可能与 LLM 来自不同厂商，
+    # 因此必须拥有独立的 API Key 和 Base URL。
+    embedding_api_key: SecretStr | None = None
+    embedding_base_url: HttpUrl | None = None
+    embedding_model: str | None = None
+
+        # ---------- 知识库与摄取配置 ----------
+
+    # ChromaDB 数据持久化目录。
+    #
+    # Path 会把环境变量中的字符串转换为路径对象，
+    # 但创建 Settings 时不会自动创建这个目录。
+    # 真正创建目录的是 Chroma PersistentClient。
+    chroma_persist_directory: Path = Path(
+        "chroma_data"
+    )
+
+    # Chroma Collection 类似关系数据库中的表。
+    #
+    # 同一个 Collection 内的向量必须来自
+    # 同一个 Embedding 模型和维度。
+    chroma_collection_name: str = Field(
+        default="robot_knowledge",
+        min_length=3,
+        max_length=512,
+    )
+
+    # Day 1–2 的两套参数在当前语料上打平。
+    #
+    # 这里暂时选择 Chunk 数量略少的 800/120，
+    # PDF 加入评测后仍需要重新比较。
+    rag_chunk_size: int = Field(
+        default=800,
+        ge=1,
+        le=20_000,
+    )
+
+    rag_chunk_overlap: int = Field(
+        default=120,
+        ge=0,
+    )
+
+    # ---------- RAG在线问答策略 ----------
+
+    # 只有Top-1相似度达到该阈值，
+    # KnowledgeQueryService才会调用LLM。
+    #
+    # 0.60来自robot_knowledge_v4上的20题校准结果：
+    # - 7道可回答题被放行；
+    # - 这些题的Top-3均包含完整Gold证据；
+    # - 4道无答案题全部被拒答；
+    # - 低于0.60会开始放行已知错误检索q008。
+    #
+    # 这是当前语料、Embedding模型和评测集上的
+    # 保守基线，不是适用于所有知识库的通用阈值。
+    rag_similarity_threshold: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+    )
+    # 一次 Embedding 请求最多包含多少段文本。
+    embedding_batch_size: int = Field(
+        default=64,
+        ge=1,
+    )
+
+    # 单个上传文件最多允许 20 MiB。
+    #
+    # 这是字节数，不是字符数。
+    max_document_size_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        ge=1,
+    )
+
+    @model_validator(mode="after")
+    def validate_chunking_configuration(
+        self,
+    ) -> Self:
+        """检查 Chunk 大小与重叠长度之间的关系。"""
+
+        # overlap 必须小于 chunk_size。
+        #
+        # 如果二者相等，例如 800/800，
+        # TextChunker 的下一次起点将无法前进，
+        # 可能导致无限循环。
+        if (
+            self.rag_chunk_overlap
+            >= self.rag_chunk_size
+        ):
+            raise ValueError(
+                "RAG_CHUNK_OVERLAP "
+                "必须小于 RAG_CHUNK_SIZE"
+            )
+
+        # mode="after" 的模型校验器必须返回
+        # 校验完成后的模型实例。
+        return self
 
 
 @lru_cache

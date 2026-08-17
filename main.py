@@ -12,7 +12,9 @@ from app.exception_handlers import application_error_handler
 from app.middleware.request_id import RequestIdMiddleware
 from app.routers.health import router as health_router
 from app.routers.triage import router as triage_router
-
+from app.routers.knowledge import (
+    router as knowledge_router,
+)
 
 def create_app() -> FastAPI:
     """创建并装配完整的 FastAPI 应用。"""
@@ -42,6 +44,8 @@ def create_app() -> FastAPI:
     # include_router() 把 APIRouter 中登记的路由合并到主应用路由表。
     application.include_router(health_router)
     application.include_router(triage_router)
+    # 注册知识库文档和 RAG 查询接口。
+    application.include_router(knowledge_router)
 
     return application
 

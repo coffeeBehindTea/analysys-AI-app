@@ -19,8 +19,12 @@ from app.schemas.knowledge_query import (
 )
 from app.schemas.retrieval import (
     EmbeddingVector,
+    HybridRetrievedChunk,
     RetrievedChunk,
 )
+# Sequence用于声明Provider只读取有序证据，
+# 不要求调用方必须使用list。
+from collections.abc import Sequence
 
 
 # 低相似度或空知识库时使用固定回答。
@@ -67,7 +71,13 @@ class KnowledgeAnswerProvider(Protocol):
         self,
         *,
         question: str,
-        evidence: list[RetrievedChunk],
+
+        # 协议允许纯向量和混合检索编排器
+        # 复用同一个回答Provider。
+        evidence: Sequence[
+            RetrievedChunk
+            | HybridRetrievedChunk
+        ],
     ) -> KnowledgeAnswerDraft:
         """返回回答正文和所用临时证据编号。"""
 

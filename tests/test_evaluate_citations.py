@@ -3,9 +3,6 @@
 # json.loads()用于检查HTTPX实际发送的请求体。
 import json
 
-# datetime和timezone用于构造带UTC时区的测试报告。
-from datetime import datetime, timezone
-
 # Path用于标注pytest临时目录参数。
 from pathlib import Path
 
@@ -34,6 +31,9 @@ from app.schemas.evaluation import (
 from app.schemas.knowledge_query import (
     KnowledgeCitation,
     KnowledgeQueryResponse,
+)
+from app.schemas.retrieval_strategy import (
+    CandidateStrategyParameters,
 )
 
 # 这两个函数是底层引用评分服务。
@@ -298,7 +298,23 @@ async def test_evaluate_citations_via_api_builds_report(
                 "robot_knowledge_v4"
             ),
             top_k=3,
-            similarity_threshold=0.70,
+            retrieval_parameters=(
+                CandidateStrategyParameters(
+                    strategy=(
+                        "hybrid_rrf_rewrite"
+                    ),
+                    top_k=3,
+                    candidate_k=20,
+                    rank_constant=60,
+                    rewrite_version=(
+                        "deterministic-v1"
+                    ),
+                )
+            ),
+            similarity_threshold=None,
+            gate_version=(
+                "hybrid-evidence-gate-v1"
+            ),
         )
 
     # 验证实际发送了两个POST请求，
@@ -338,9 +354,22 @@ async def test_evaluate_citations_via_api_builds_report(
 
     assert report.top_k == 3
 
+    assert report.retrieval_parameters is not None
     assert (
-        report.similarity_threshold
-        == 0.70
+        report.retrieval_parameters.strategy
+        == "hybrid_rrf_rewrite"
+    )
+    assert (
+        report.retrieval_parameters.candidate_k
+        == 20
+    )
+    assert (
+        report.retrieval_parameters.rank_constant
+        == 60
+    )
+    assert report.similarity_threshold is None
+    assert report.gate_version == (
+        "hybrid-evidence-gate-v1"
     )
 
     # 报告必须保留两道题的原始顺序。
@@ -743,9 +772,6 @@ def make_success_report(
     ]
 
     return CitationEvaluationReport(
-        generated_at=datetime.now(
-            timezone.utc
-        ),
         api_url=API_URL,
         llm_model="test-llm",
         embedding_model="embedding-3",
@@ -771,7 +797,6 @@ def make_answerable_abstention_report(
         retrieval_ms=90.0,
         abstained=True,
     )
-
     result = evaluate_citation_question(
         question=q005,
         response=abstained_response,
@@ -782,9 +807,6 @@ def make_answerable_abstention_report(
     ]
 
     return CitationEvaluationReport(
-        generated_at=datetime.now(
-            timezone.utc
-        ),
         api_url=API_URL,
         llm_model="test-llm",
         embedding_model="embedding-3",
@@ -795,6 +817,30 @@ def make_answerable_abstention_report(
             results
         ),
         results=results,
+    )
+
+
+def make_hybrid_success_report(
+) -> CitationEvaluationReport:
+    """创建使用真实Week 3策略元数据的成功报告。"""
+
+    legacy_report = make_success_report()
+    report_data = legacy_report.model_dump()
+
+    report_data["retrieval_parameters"] = {
+        "strategy": "hybrid_rrf_rewrite",
+        "top_k": 3,
+        "candidate_k": 20,
+        "rank_constant": 60,
+        "rewrite_version": "deterministic-v1",
+    }
+    report_data["similarity_threshold"] = None
+    report_data["gate_version"] = (
+        "hybrid-evidence-gate-v1"
+    )
+
+    return CitationEvaluationReport.model_validate(
+        report_data
     )
 
 
@@ -810,6 +856,7 @@ def test_render_markdown_contains_summary_and_passed_questions(
         "# Day 5–7 RAG回答引用评测"
         in markdown
     )
+    assert "生成时间" not in markdown
 
     assert (
         "robot_knowledge_v4"
@@ -836,6 +883,36 @@ def test_render_markdown_contains_summary_and_passed_questions(
         "本次评测没有发现失败案例。"
         in markdown
     )
+
+
+def test_render_markdown_describes_hybrid_gate_strategy(
+) -> None:
+    """混合报告应显示真实策略参数而不是旧相似度阈值。"""
+
+    markdown = render_markdown_report(
+        make_hybrid_success_report()
+    )
+
+    assert (
+        "- 检索策略：`hybrid_rrf_rewrite`"
+        in markdown
+    )
+    assert "生成时间" not in markdown
+    assert "- 单路候选深度：20" in markdown
+    assert "- RRF排名常数：60" in markdown
+    assert (
+        "- 查询改写版本：`deterministic-v1`"
+        in markdown
+    )
+    assert (
+        "- 证据门控版本："
+        "`hybrid-evidence-gate-v1`"
+        in markdown
+    )
+
+    # 在线混合门控综合多种信号，
+    # 因此报告不能继续声称使用单一拒答阈值。
+    assert "相似度拒答阈值" not in markdown
 
 
 def test_render_markdown_explains_answerable_abstention(

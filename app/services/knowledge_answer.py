@@ -3,6 +3,10 @@
 # json.loads()将模型JSON字符串解析成Python对象。
 import json
 
+# Sequence表示Provider只读取证据，
+# 不会向证据集合中增加或删除元素。
+from collections.abc import Sequence
+
 from openai import (
     APIConnectionError,
     APIStatusError,
@@ -21,10 +25,22 @@ from app.errors import (
 from app.schemas.knowledge_query import (
     KnowledgeAnswerDraft,
 )
-from app.schemas.retrieval import RetrievedChunk
+from app.schemas.retrieval import (
+    HybridRetrievedChunk,
+    RetrievedChunk,
+)
 from app.services.knowledge_prompts import (
     build_knowledge_answer_messages,
 )
+
+# 知识库问答要求模型生成短小、严格的JSON。
+#
+# temperature控制模型采样的随机程度。
+# 0.0用于降低同一问题多次执行时的不必要波动。
+#
+# 它不代表数学意义上的绝对确定；
+# 上游模型版本和基础设施变化仍可能影响结果。
+KNOWLEDGE_ANSWER_TEMPERATURE = 0.0
 
 
 class OpenAIKnowledgeAnswerProvider:
@@ -52,7 +68,10 @@ class OpenAIKnowledgeAnswerProvider:
         self,
         *,
         question: str,
-        evidence: list[RetrievedChunk],
+        evidence: Sequence[
+            RetrievedChunk
+            | HybridRetrievedChunk
+        ],
     ) -> KnowledgeAnswerDraft:
         """生成回答正文和模型实际使用的证据编号。"""
 
@@ -66,6 +85,27 @@ class OpenAIKnowledgeAnswerProvider:
                 await self._client.chat.completions.create(
                     model=self._model,
                     messages=messages,
+
+                    # 结构化知识问答更重视稳定性，
+                    # 不需要通过随机采样产生多种表达。
+                    temperature=(
+                        KNOWLEDGE_ANSWER_TEMPERATURE
+                    ),
+
+                    # extra_body用于向OpenAI SDK生成的
+                    # HTTP请求体中加入供应商专有参数。
+                    #
+                    # DeepSeek的thinking不是OpenAI SDK
+                    # 标准参数，所以不能直接写成：
+                    #
+                    # thinking={...}
+                    #
+                    # 必须通过extra_body传递。
+                    extra_body={
+                        "thinking": {
+                            "type": "disabled",
+                        },
+                    },
                 )
             )
         except APITimeoutError as exc:

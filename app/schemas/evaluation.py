@@ -1,8 +1,5 @@
 """检索评测问题、预期证据和评测报告的数据契约。"""
 
-# datetime 表示评测报告的生成时间。
-from datetime import datetime
-
 # Literal 限制字段只能取指定字符串；
 # Self 表示当前模型自身的类型。
 from typing import Literal, Self
@@ -300,10 +297,6 @@ class RetrievalEvaluationReport(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-
-    # 使用 datetime，而不是普通字符串，
-    # 让 Pydantic 验证它确实是合法时间。
-    generated_at: datetime
 
     # 记录评测使用的向量模型。
     #

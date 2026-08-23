@@ -25,6 +25,7 @@ from app.errors import (
 )
 from app.schemas.retrieval import (
     DocumentChunk,
+    HybridRetrievedChunk,
     RetrievedChunk,
 )
 from app.services.knowledge_answer import (
@@ -65,6 +66,72 @@ def make_evidence(
             ),
             similarity=0.82,
             rank=1,
+        )
+    ]
+
+
+def make_hybrid_evidence(
+    *,
+    keyword_only: bool = False,
+) -> list[HybridRetrievedChunk]:
+    """创建双路命中或关键词单路命中的混合检索证据。"""
+
+    # 使用固定的64位十六进制文档ID，
+    # 让测试数据稳定并符合真实Chunk ID的结构。
+    document_id = "f" * 64
+
+    # keyword_only=True模拟一个重要边界：
+    # Chunk被精确错误码检索找到，
+    # 但没有进入向量检索候选列表。
+    vector_rank = (
+        None
+        if keyword_only
+        else 1
+    )
+    vector_similarity = (
+        None
+        if keyword_only
+        else 0.61
+    )
+
+    return [
+        HybridRetrievedChunk(
+            chunk=DocumentChunk(
+                chunk_id=(
+                    f"{document_id}:000003"
+                ),
+                document_id=document_id,
+                source_file=(
+                    "warehouse-faults.txt"
+                ),
+                page_or_section=(
+                    "section: ERR-NET-4001"
+                ),
+                chunk_index=3,
+                content_hash="a" * 64,
+                content=(
+                    "ERR-NET-4001表示调度心跳超时；"
+                    "网络恢复后不得自动继续旧任务。"
+                ),
+            ),
+
+            # 关键词单路命中只有一个倒数排名贡献；
+            # 双路命中同时获得向量和关键词贡献。
+            rrf_score=(
+                0.016393
+                if keyword_only
+                else 0.032787
+            ),
+            rank=1,
+            vector_rank=vector_rank,
+            vector_similarity=(
+                vector_similarity
+            ),
+            keyword_rank=1,
+            keyword_score=15.0,
+            matched_identifiers=(
+                "err-net-4001",
+            ),
         )
     ]
 
@@ -141,6 +208,75 @@ def test_prompt_serializes_question_and_evidence(
             ),
         }
     ]
+
+
+def test_prompt_serializes_dual_path_hybrid_evidence(
+) -> None:
+    """Prompt应接收向量和关键词双路命中的融合证据。"""
+
+    messages = build_knowledge_answer_messages(
+        question=(
+            "ERR-NET-4001网络恢复后"
+            "能否自动继续旧任务？"
+        ),
+        evidence=make_hybrid_evidence(),
+    )
+
+    # User Message的第一行是边界说明，
+    # 第一行之后才是可由json.loads()解析的载荷。
+    _, payload_json = (
+        messages[1]["content"].split(
+            "\n",
+            1,
+        )
+    )
+    payload = json.loads(payload_json)
+    evidence_item = payload["evidence"][0]
+
+    # 双路命中的Chunk有真实向量相似度，
+    # 因此可以诚实地把0.61交给Prompt。
+    assert evidence_item["similarity"] == 0.61
+    assert evidence_item["evidence_id"] == "E1"
+    assert evidence_item["rank"] == 1
+    assert evidence_item["source_file"] == (
+        "warehouse-faults.txt"
+    )
+
+    # RRF分数只用于Python侧融合排序和API审计，
+    # 不是事实证据或回答置信度，
+    # 所以不应发送给LLM解释。
+    assert "rrf_score" not in evidence_item
+
+
+def test_prompt_keeps_keyword_only_similarity_null(
+) -> None:
+    """关键词单路证据不能伪造向量相似度。"""
+
+    messages = build_knowledge_answer_messages(
+        question=(
+            "ERR-NET-4001网络恢复后"
+            "能否自动继续旧任务？"
+        ),
+        evidence=make_hybrid_evidence(
+            keyword_only=True,
+        ),
+    )
+
+    _, payload_json = (
+        messages[1]["content"].split(
+            "\n",
+            1,
+        )
+    )
+    payload = json.loads(payload_json)
+    evidence_item = payload["evidence"][0]
+
+    # Python中的None经过json.dumps()后会成为JSON null。
+    # 这明确表示“本次没有向量召回分数”，
+    # 而不是把0或RRF分数冒充成余弦相似度。
+    assert evidence_item["similarity"] is None
+    assert evidence_item["evidence_id"] == "E1"
+    assert "rrf_score" not in evidence_item
 
 
 def test_prompt_requires_status_qualifiers_to_be_preserved(
@@ -418,6 +554,20 @@ async def test_provider_returns_cleaned_content(
         "test-model"
     )
 
+    # 知识问答要求模型返回短小、严格的JSON，
+    # 因此使用0温度降低不必要的采样波动。
+    assert awaited_kwargs["temperature"] == 0.0
+
+    # DeepSeek思考模式可能只产生reasoning_content，
+    # 而让最终message.content为空。
+    # Provider必须显式关闭思考模式，确保结构化JSON
+    # 出现在message.content中供后续解析。
+    assert awaited_kwargs["extra_body"] == {
+        "thinking": {
+            "type": "disabled",
+        },
+    }
+
     # messages是Provider发送给模型的聊天消息列表。
     messages = awaited_kwargs["messages"]
 
@@ -571,4 +721,67 @@ async def test_provider_rejects_invalid_json(
             evidence=make_evidence(),
         )
 
+    mock_create.assert_awaited_once()
+
+
+def test_prompt_defines_secondary_abstention_contract(
+) -> None:
+    """Prompt必须告诉LLM如何返回可校验的二次拒答。"""
+
+    messages = build_knowledge_answer_messages(
+        question="候选证据没有覆盖问题时怎么办？",
+        evidence=make_evidence(),
+    )
+
+    # 第一条消息是约束模型行为的System Prompt。
+    system_prompt = messages[0]["content"]
+
+    # Prompt必须区分两种互斥结果：
+    # 证据足够时正常回答；证据不足时明确拒答。
+    assert "证据足够时" in system_prompt
+    assert "证据不足时" in system_prompt
+
+    # 拒答结构必须明确包含状态字段和空证据列表，
+    # 否则模型仍可能返回当前Schema无法表达的结果。
+    assert '"abstained": true' in system_prompt
+    assert '"used_evidence_ids": []' in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_provider_accepts_secondary_abstention(
+) -> None:
+    """合法拒答JSON应解析成KnowledgeAnswerDraft。"""
+
+    fake_llm_content = json.dumps(
+        {
+            "answer": (
+                "知识库没有足够证据回答该问题。"
+            ),
+            "used_evidence_ids": [],
+            "abstained": True,
+        },
+        ensure_ascii=False,
+    )
+
+    # Mock替代真实OpenAI兼容服务，
+    # 使测试只验证Provider的解析与校验流程。
+    mock_client, mock_create = (
+        create_mock_client_with_content(
+            fake_llm_content
+        )
+    )
+    provider = OpenAIKnowledgeAnswerProvider(
+        client=mock_client,
+        model="test-model",
+    )
+
+    # 预期流程：构造消息 -> await Mock接口 ->
+    # json.loads() -> Pydantic校验 -> 返回拒答草稿。
+    draft = await provider.generate_answer(
+        question="候选证据是否足够？",
+        evidence=make_evidence(),
+    )
+
+    assert draft.abstained is True
+    assert draft.used_evidence_ids == []
     mock_create.assert_awaited_once()

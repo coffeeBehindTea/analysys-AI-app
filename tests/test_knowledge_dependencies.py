@@ -1,6 +1,7 @@
 """知识库 FastAPI 依赖装配的离线测试。"""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,8 +11,34 @@ from app.services.document_service import (
     DocumentService,
 )
 
-from app.services.knowledge_query import (
-    KnowledgeQueryService,
+from app.services.embedding import (
+    EmbeddingService,
+)
+from app.services.gated_hybrid_retrieval import (
+    GatedHybridRetriever,
+)
+from app.services.head_preserving_reranking import (
+    HeadPreservationPolicy,
+)
+from app.services.hybrid_knowledge_query import (
+    HybridKnowledgeQueryService,
+)
+from app.services.hybrid_retrieval import (
+    DEFAULT_HYBRID_CANDIDATE_K,
+    DEFAULT_RRF_RANK_CONSTANT,
+    HybridRetriever,
+)
+from app.services.hybrid_retrieval_gate import (
+    HYBRID_EVIDENCE_GATE_VERSION,
+)
+from app.services.keyword_retrieval import (
+    KeywordRetriever,
+)
+from app.services.knowledge_answer import (
+    OpenAIKnowledgeAnswerProvider,
+)
+from app.services.query_rewriting_retrieval import (
+    QueryRewritingHybridRetriever,
 )
 
 class FakeAsyncOpenAIClient:
@@ -145,7 +172,7 @@ def test_document_service_can_be_assembled_without_network(
 def test_knowledge_query_service_can_be_assembled_without_network(
     tmp_path: Path,
 ) -> None:
-    """RAG问答Service的构造过程不应联网。"""
+    """混合RAG问答依赖图应完整装配且不联网。"""
 
     settings = make_settings(tmp_path)
 
@@ -171,10 +198,163 @@ def test_knowledge_query_service_can_be_assembled_without_network(
 
     assert isinstance(
         service,
-        KnowledgeQueryService,
+        HybridKnowledgeQueryService,
     )
 
-    # 构造Service只是在连接对象，
+    # 最外层Service首先依赖组合证据门控检索器。
+    gated_retriever = (
+        service._retrieval_provider
+    )
+    assert isinstance(
+        gated_retriever,
+        GatedHybridRetriever,
+    )
+    assert gated_retriever._policy.version == (
+        HYBRID_EVIDENCE_GATE_VERSION
+    )
+
+    # 门控下方是查询改写编排器。
+    rewriting_retriever = (
+        gated_retriever
+        ._retrieval_provider
+    )
+    assert isinstance(
+        rewriting_retriever,
+        QueryRewritingHybridRetriever,
+    )
+
+    # 查询改写后的文本由EmbeddingService
+    # 使用请求级Embedding客户端转成查询向量。
+    embedding_provider = (
+        rewriting_retriever
+        ._embedding_provider
+    )
+    assert isinstance(
+        embedding_provider,
+        EmbeddingService,
+    )
+    assert embedding_provider._client is (
+        embedding_client
+    )
+    assert embedding_provider._model == (
+        "test-embedding-model"
+    )
+
+    # 同一份改写查询同时进入向量和关键词路径，
+    # 再由HybridRetriever执行RRF融合。
+    hybrid_retriever = (
+        rewriting_retriever
+        ._hybrid_retriever
+    )
+    assert isinstance(
+        hybrid_retriever,
+        HybridRetriever,
+    )
+    assert hybrid_retriever._vector_retriever is (
+        store
+    )
+    assert isinstance(
+        hybrid_retriever._keyword_retriever,
+        KeywordRetriever,
+    )
+    assert hybrid_retriever._candidate_k == (
+        DEFAULT_HYBRID_CANDIDATE_K
+    )
+    assert hybrid_retriever._rank_constant == (
+        DEFAULT_RRF_RANK_CONSTANT
+    )
+
+    # 在线知识问答必须使用已通过离线评测的
+    # head-preserving-v1头部保留参数。
+    rerank_policy = (
+        hybrid_retriever._rerank_policy
+    )
+    assert isinstance(
+        rerank_policy,
+        HeadPreservationPolicy,
+    )
+    assert rerank_policy.fused_head_k == 1
+    assert rerank_policy.vector_head_k == 1
+    assert rerank_policy.keyword_head_k == 2
+
+    # 门控放行后使用生成式LLM回答Provider，
+    # 不能误用Embedding客户端。
+    answer_provider = (
+        service._answer_provider
+    )
+    assert isinstance(
+        answer_provider,
+        OpenAIKnowledgeAnswerProvider,
+    )
+    assert answer_provider._client is llm_client
+    assert answer_provider._model == (
+        "test-llm-model"
+    )
+
+    # 构造Service只创建并连接对象；
     # 真正的Embedding和LLM调用发生在answer_query()。
     assert embedding_client.network_calls == 0
     assert llm_client.network_calls == 0
+
+
+def test_knowledge_query_service_reuses_generic_hybrid_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """知识问答依赖必须复用通用混合检索装配工厂。"""
+
+    settings = make_settings(tmp_path)
+    embedding_client = object()
+    llm_client = object()
+    vector_store = object()
+
+    # sentinel_retriever只作为身份标记，
+    # 当前测试不会调用它的retrieve()方法。
+    sentinel_retriever = object()
+
+    # MagicMock会记录工厂收到的关键字参数，
+    # 并返回固定的身份标记。
+    retrieval_factory = MagicMock(
+        return_value=sentinel_retriever
+    )
+
+    monkeypatch.setattr(
+        dependencies,
+        "build_gated_hybrid_retrieval_provider",
+        retrieval_factory,
+    )
+
+    service = (
+        dependencies.get_knowledge_query_service(
+            embedding_client=(
+                embedding_client  # type: ignore[arg-type]
+            ),
+            llm_client=(
+                llm_client  # type: ignore[arg-type]
+            ),
+            vector_store=(
+                vector_store  # type: ignore[arg-type]
+            ),
+            settings=settings,
+        )
+    )
+
+    retrieval_factory.assert_called_once_with(
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+        settings=settings,
+    )
+    assert isinstance(
+        service,
+        HybridKnowledgeQueryService,
+    )
+    assert service._retrieval_provider is (
+        sentinel_retriever
+    )
+
+    # 通用工厂只负责检索链；
+    # 回答Provider仍由知识问答依赖函数创建。
+    assert isinstance(
+        service._answer_provider,
+        OpenAIKnowledgeAnswerProvider,
+    )

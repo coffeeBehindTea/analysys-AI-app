@@ -1,6 +1,5 @@
 # Day 3–4 文档摄取日志
 
-- 生成时间：`2026-08-14T11:26:32+08:00`
 - Embedding 模型：`embedding-3`
 - Chroma Collection：`robot_knowledge_v4`
 - Chroma 持久化目录：`chroma_data`

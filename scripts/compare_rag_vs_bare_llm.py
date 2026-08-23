@@ -10,9 +10,6 @@ import asyncio
 # json负责把Pydantic报告转换成格式化JSON文本。
 import json
 
-# datetime用于记录实验报告生成时间。
-from datetime import datetime
-
 # Path提供跨平台的文件路径对象，
 # 后面使用它创建目录并写入JSON/Markdown报告。
 from pathlib import Path
@@ -350,9 +347,6 @@ async def compare_rag_and_bare(
         )
 
     return RagVsBareLLMReport(
-        generated_at=(
-            datetime.now().astimezone()
-        ),
         rag_api_url=(
             cleaned_metadata["rag_api_url"]
         ),
@@ -438,10 +432,6 @@ def render_markdown_report(
         "",
         "## 实验配置",
         "",
-        (
-            "- 生成时间："
-            f"`{report.generated_at.isoformat()}`"
-        ),
         f"- RAG API：`{report.rag_api_url}`",
         f"- LLM模型：`{report.llm_model}`",
         (

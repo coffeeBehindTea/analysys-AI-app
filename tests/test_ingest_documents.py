@@ -167,13 +167,13 @@ def test_build_ingestion_report_contains_summary() -> None:
         entries=entries,
         settings=settings,
         embedding_model="fake-embedding",
-        generated_at="2026-08-13T10:00:00+08:00",
     )
 
     assert "成功 1；跳过 1；失败 0" in report
     assert "manual.txt" in report
     assert "`" + ("b" * 64) + "`" in report
     assert "test_knowledge" in report
+    assert "生成时间" not in report
 
     # 报告不应包含 Chunk 正文或向量。
     assert "机器人急停正文" not in report

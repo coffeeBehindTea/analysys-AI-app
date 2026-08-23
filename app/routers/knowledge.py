@@ -50,8 +50,8 @@ from app.services.document_service import (
 from app.services.upload_staging import (
     stage_uploaded_file,
 )
-from app.services.knowledge_query import (
-    KnowledgeQueryService,
+from app.services.hybrid_knowledge_query import (
+    HybridKnowledgeQueryService,
 )
 
 # prefix 会添加到本文件中所有接口路径前。
@@ -267,9 +267,11 @@ async def query_knowledge(
     # 因此FastAPI将它解析为JSON请求体。
     query_request: KnowledgeQueryRequest,
 
-    # FastAPI通过依赖图装配真实RAG Service。
+    # FastAPI调用get_knowledge_query_service()，
+    # 注入已经连接好检索、门控和回答依赖的
+    # HybridKnowledgeQueryService。
     service: Annotated[
-        KnowledgeQueryService,
+        HybridKnowledgeQueryService,
         Depends(get_knowledge_query_service),
     ],
 ) -> KnowledgeQueryResponse:

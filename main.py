@@ -15,6 +15,9 @@ from app.routers.triage import router as triage_router
 from app.routers.knowledge import (
     router as knowledge_router,
 )
+from app.routers.diagnostics import (
+    router as diagnostics_router,
+)
 
 def create_app() -> FastAPI:
     """创建并装配完整的 FastAPI 应用。"""
@@ -46,6 +49,10 @@ def create_app() -> FastAPI:
     application.include_router(triage_router)
     # 注册知识库文档和 RAG 查询接口。
     application.include_router(knowledge_router)
+    # 注册证据约束结构化诊断接口。
+    application.include_router(
+        diagnostics_router
+    )
 
     return application
 

@@ -48,6 +48,8 @@ __pycache__/
 *$py.class
 
 .pytest_cache/
+# pytest.ini 指定的项目内测试临时根目录。
+.pytest_tmp/
 .mypy_cache/
 .ruff_cache/
 
@@ -150,3 +152,39 @@ uploads/
 !/docs/retrieval-evaluation-summary.md
 !/docs/citation-evaluation-summary.md
 !/docs/rag-vs-bare-llm-summary.md
+
+# =========================================================
+# 本地学习记录与AI开发工具配置
+# =========================================================
+
+# 这些文件用于个人学习过程，不属于公开项目交付物。
+/day*.md
+/week*技术细节.md
+
+# 本地AI开发工具可能产生的项目级配置。
+/.codex/
+/.agents/
+
+
+# =========================================================
+# Week 3 含完整证据正文的评测明细
+# =========================================================
+
+# 单策略报告包含大量召回Chunk正文。
+# 只公开经过脱敏汇总的策略对比报告。
+/docs/retrieval-strategy-*.md
+!/docs/retrieval-strategy-comparison.md
+
+# 门控评测和Prompt对照报告包含逐题证据或模型输出。
+# 最终结论已经写入公开的测试报告和工程复盘。
+/docs/hybrid-gate-evaluation*.md
+/docs/diagnosis-prompt-comparison*.md
+
+
+# =========================================================
+# pytest机器可读报告
+# =========================================================
+
+# 历史JUnit报告不再提交，只保留最终完整回归结果。
+/docs/pytest-results*.xml
+!/docs/pytest-results-week3-final.xml

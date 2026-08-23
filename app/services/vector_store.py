@@ -21,6 +21,12 @@ from app.schemas.retrieval import (
     EmbeddingVector,
     RetrievedChunk,
 )
+# RetrievalScopeFilter把统一检索范围
+# 转换成Chroma能够执行的where条件。
+from app.services.retrieval_scope import (
+    RetrievalScopeFilter,
+)
+
 # 可以识别并拒绝 NaN、正无穷和负无穷。
 from math import isfinite
 
@@ -53,14 +59,27 @@ class VectorStore(Protocol):
 
         ...
 
+    def list_chunks(
+        self,
+    ) -> list[DocumentChunk]:
+        """返回当前Collection中的全部可检索Chunk。"""
+
+        ...
+
     def retrieve(
-    self,
-    query_embedding: EmbeddingVector,
-    *,
-    query_embedding_model: str,
-    top_k: int = 3,
+        self,
+        query_embedding: EmbeddingVector,
+        *,
+        query_embedding_model: str,
+        top_k: int = 3,
+
+        # None表示搜索整个Collection；
+        # 提供过滤器时只搜索允许范围。
+        retrieval_scope: (
+            RetrievalScopeFilter | None
+        ) = None,
     ) -> list[RetrievedChunk]:
-        """返回与查询向量最接近的 Top-K Chunk。"""
+        """在可选文档范围内返回最接近的Top-K Chunk。"""
 
         ...
 
@@ -420,19 +439,207 @@ class ChromaVectorStore:
             ),
         )
 
+    def list_chunks(
+        self,
+    ) -> list[DocumentChunk]:
+        """从Chroma正文和元数据中恢复全部Chunk。"""
+
+        try:
+            # get()读取已经保存的记录，
+            # 不执行向量相似度搜索。
+            #
+            # ids即使没有写入include，
+            # 也会作为记录身份自动返回。
+            #
+            # 这里只请求正文和元数据，
+            # 不读取每个Chunk对应的Embedding向量。
+            result = self._collection.get(
+                include=[
+                    "documents",
+                    "metadatas",
+                ]
+            )
+        except Exception as exc:
+            # Chroma客户端、文件系统或数据库访问失败
+            # 被转换成项目统一的存储层异常。
+            raise VectorStoreError(
+                "读取知识库Chunk时访问向量库失败"
+            ) from exc
+
+        try:
+            # Chroma get()的返回结构是列式数据：
+            #
+            # ids[0]、documents[0]、metadatas[0]
+            # 共同描述第一条Chunk记录。
+            #
+            # 与query()不同，get()的结果不是
+            # “查询批次 → 结果”的两层列表。
+            chunk_ids = result["ids"]
+            documents = result["documents"]
+            metadatas = result["metadatas"]
+
+            # include中明确请求了这两列，
+            # 所以返回None表示存储结果结构异常。
+            if (
+                documents is None
+                or metadatas is None
+            ):
+                raise ValueError(
+                    "Chroma Chunk结果缺少正文或元数据"
+                )
+
+            result_count = len(chunk_ids)
+
+            # 三列数据必须一一对应。
+            #
+            # 如果IDs有355项而正文只有354项，
+            # 就不能安全判断缺失的是哪个Chunk。
+            if not (
+                len(documents) == result_count
+                and len(metadatas) == result_count
+            ):
+                raise ValueError(
+                    "Chroma Chunk结果各字段数量不一致"
+                )
+
+            chunks: list[DocumentChunk] = []
+
+            # strict=True要求三个序列长度完全相同。
+            #
+            # 前面的长度检查提供清晰错误消息；
+            # strict=True则形成第二层防御。
+            for (
+                chunk_id,
+                document,
+                metadata,
+            ) in zip(
+                chunk_ids,
+                documents,
+                metadatas,
+                strict=True,
+            ):
+                if (
+                    document is None
+                    or metadata is None
+                ):
+                    raise ValueError(
+                        "Chroma Chunk结果包含空字段"
+                    )
+
+                # 每条Chunk元数据都应记录摄取时
+                # 使用的Embedding模型。
+                #
+                # 即使关键词检索本身不使用向量，
+                # 也不能从配置不一致的Collection中
+                # 静默读取可能已经污染的数据。
+                stored_model = str(
+                    metadata["embedding_model"]
+                )
+
+                if (
+                    stored_model
+                    != self._embedding_model
+                ):
+                    raise ValueError(
+                        "存储Chunk的Embedding模型"
+                        "与Collection不一致"
+                    )
+
+                # Chroma把正文和元数据分列保存，
+                # 这里重新恢复项目统一的DocumentChunk。
+                chunks.append(
+                    DocumentChunk(
+                        chunk_id=str(chunk_id),
+                        document_id=str(
+                            metadata["document_id"]
+                        ),
+                        source_file=str(
+                            metadata["source_file"]
+                        ),
+                        page_or_section=str(
+                            metadata[
+                                "page_or_section"
+                            ]
+                        ),
+                        chunk_index=int(
+                            metadata["chunk_index"]
+                        ),
+                        content_hash=str(
+                            metadata["content_hash"]
+                        ),
+                        content=str(document),
+                    )
+                )
+
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            # KeyError：
+            # 元数据中缺少document_id等必要字段。
+            #
+            # TypeError：
+            # Chroma返回结构不是预期的列表或字典。
+            #
+            # ValueError：
+            # 数值转换失败、字段数量不一致，
+            # 或DocumentChunk的Pydantic校验失败。
+            raise VectorStoreError(
+                "向量库中的Chunk数据结构无效"
+            ) from exc
+
+        # Chroma内部返回顺序不属于业务契约，
+        # 因此显式排序以获得可复现结果。
+        return sorted(
+            chunks,
+            key=lambda chunk: (
+                chunk.source_file.casefold(),
+                chunk.document_id,
+                chunk.chunk_index,
+                chunk.chunk_id,
+            ),
+        )
+
     def retrieve(
         self,
         query_embedding: EmbeddingVector,
         *,
         query_embedding_model: str,
         top_k: int = 3,
+
+        # 本次向量查询可选的文档范围。
+        #
+        # 默认None保持现有全库检索行为。
+        retrieval_scope: (
+            RetrievalScopeFilter | None
+        ) = None,
     ) -> list[RetrievedChunk]:
-        """使用查询向量召回最接近的知识库 Chunk。"""
+        """在可选范围内使用查询向量召回Top-K Chunk。"""
 
         # Top-0 或负数没有检索意义。
         if top_k < 1:
             raise ValueError(
                 "top_k 必须大于或等于 1"
+            )
+
+        # 普通dict不能直接作为数据库过滤条件，
+        # 因为它没有经过RetrievalScopeFilter的：
+        #
+        # 1. 文档ID格式检查；
+        # 2. 文件名清理；
+        # 3. 重复项检查；
+        # 4. AND/OR语义固定。
+        if (
+            retrieval_scope is not None
+            and not isinstance(
+                retrieval_scope,
+                RetrievalScopeFilter,
+            )
+        ):
+            raise TypeError(
+                "retrieval_scope必须是"
+                "RetrievalScopeFilter或None"
             )
 
         cleaned_model = query_embedding_model.strip()
@@ -468,6 +675,16 @@ class ChromaVectorStore:
                 "必须使用同一个 Embedding 模型"
             )
 
+        # None表示不限制Collection范围。
+        #
+        # 提供过滤器时，将统一范围规则转换成
+        # Chroma能够执行的元数据where表达式。
+        where_condition = (
+            retrieval_scope.to_chroma_where()
+            if retrieval_scope is not None
+            else None
+        )
+
         try:
             # count() 返回 Collection 中的记录数量。
             #
@@ -493,20 +710,22 @@ class ChromaVectorStore:
                     list(query_embedding)
                 ],
 
-                # 当知识库只有两个 Chunk、top_k=3 时，
-                # 实际最多只能取回两个结果。
+                # stored_chunk_count是整个Collection的数量。
+                #
+                # where匹配数量少于n_results时，
+                # Chroma只返回实际匹配的记录，
+                # 不会使用范围外记录补足数量。
                 n_results=min(
                     top_k,
                     stored_chunk_count,
                 ),
 
-                # 还原 RetrievedChunk 需要：
-                # 1. documents：Chunk 正文；
-                # 2. metadatas：来源与 Chunk 元数据；
-                # 3. distances：与查询向量的距离。
+                # where=None表示搜索整个Collection。
                 #
-                # 不需要取回原始 Embedding，
-                # 避免数据库返回大量无用浮点数。
+                # where为字典时，Chroma只在符合
+                # 元数据条件的向量中执行近邻搜索。
+                where=where_condition,
+
                 include=[
                     "documents",
                     "metadatas",

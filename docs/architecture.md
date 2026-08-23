@@ -2,7 +2,7 @@
 
 ## 1. 文档目的
 
-本文档说明 Robot Knowledge Base API 的模块边界、核心数据契约、文档摄取链路、RAG 查询链路、依赖注入、向量存储、错误处理、评测体系和主要设计决策。
+本文档说明 Robot Knowledge Base API 的模块边界、核心数据契约、文档摄取链路、混合RAG查询链路、结构化诊断链路、依赖注入、向量存储、错误处理、评测体系和主要设计决策。
 
 README 主要回答：
 
@@ -21,7 +21,7 @@ README 主要回答：
 
 ## 2. 系统范围
 
-当前项目包含两类 AI 能力。
+当前项目包含三类 AI 能力。
 
 ### 2.1 Week 1：机器人故障分诊
 
@@ -54,6 +54,27 @@ README 主要回答：
 - 是否拒答。
 
 Week 2 的核心不是让模型“知道更多”，而是建立一个可追溯、可评测、无证据时能够拒答的知识访问层。
+
+### 2.3 Week 3：混合检索与结构化诊断
+
+输入：
+
+- 自然语言知识库问题；或
+- 机器人编号、故障现象、脱敏日志和可选检索范围。
+
+新增能力：
+
+- 错误码、型号、数值和单位的确定性归一化；
+- 向量与关键词双路召回；
+- Reciprocal Rank Fusion；
+- `deterministic-v2`查询改写；
+- `head-preserving-v1`头部保留重排；
+- `hybrid-evidence-gate-v1`组合证据门控；
+- 受Pydantic约束的结构化诊断报告；
+- 原因和检查项到真实Chunk ID的白名单映射；
+- 冲突、无答案、非法输出、超时和上游失败的稳定降级。
+
+Week 3 的核心是把“检索、门控、生成、引用”拆成可以独立评测的阶段，并让诊断结果中的每项非空结论都能追溯到本次返回的真实证据。
 
 当前系统不包含：
 
@@ -122,7 +143,7 @@ OpenAI兼容服务 / ChromaDB / 文件系统
 - 创建 `FastAPI`；
 - 注册统一异常处理器；
 - 注册 Request ID Middleware；
-- 注册 health、triage 和 knowledge Router。
+- 注册 health、triage、knowledge 和 diagnostics Router。
 
 它不负责：
 
@@ -161,6 +182,12 @@ POST /api/v1/knowledge/query
 
 Router 知道请求体是 `KnowledgeQueryRequest`，但不知道相似度门控和引用白名单如何实现。
 
+```text
+POST /api/v1/diagnostics
+```
+
+Router 知道请求体是 `DiagnosisRequest`，并从 `Request.state` 读取Request ID；它不知道查询改写、RRF、门控、LLM草稿和真实Chunk映射怎样实现。
+
 ### 4.3 `app/schemas/`：数据契约层
 
 Schema 负责：
@@ -180,10 +207,11 @@ Schema 不负责发送网络请求或访问数据库。
 Service 负责：
 
 - 文档解析、切分、向量化和持久化编排；
-- 查询 Embedding 和 Top-K 检索；
-- 相似度拒答；
+- 查询归一化、改写、关键词与向量召回；
+- RRF融合、头部保留重排和组合门控；
 - LLM 回答；
 - 引用映射；
+- 结构化诊断与稳定降级；
 - 评测计算。
 
 ### 4.5 `app/dependencies.py`：依赖装配层
@@ -207,6 +235,9 @@ Service 本身不读取 `.env`，也不自行创建真实客户端。
 - 引用评测；
 - 切分比较；
 - RAG 与裸 LLM 对照实验。
+- 候选策略对比和统一口径重评分；
+- 混合门控评测；
+- 诊断Prompt A/B对照实验。
 
 脚本复用 `app/` 中的 Schema 和 Service，不复制一套独立业务逻辑。
 
@@ -348,13 +379,15 @@ DocumentChunk
 |---|---|
 | `answer` | 模型生成的回答正文 |
 | `used_evidence_ids` | 模型声明使用的临时证据编号 |
+| `abstained` | 模型阅读证据后是否执行二次拒答 |
 
 示例：
 
 ```json
 {
   "answer": "只根据证据生成的回答",
-  "used_evidence_ids": ["E1", "E2"]
+  "used_evidence_ids": ["E1", "E2"],
+  "abstained": false
 }
 ```
 
@@ -394,6 +427,34 @@ citations = []
 ```
 
 成功回答必须包含至少一项引用。
+
+### 5.9 `HybridRetrievedChunk`
+
+表示向量和关键词融合后的候选。它保留：
+
+- 真实 `DocumentChunk`；
+- `rrf_score`；
+- 最终 `rank`；
+- 可选 `vector_similarity`；
+- 向量路径和关键词路径中的原始排名；
+- 命中的错误码、型号、数值和词面术语。
+
+`rrf_score` 是融合排名分数，`vector_similarity` 是余弦相似度。二者语义和量纲不同，不能互相替代。
+
+### 5.10 `DiagnosisLLMDraft` 与 `DiagnosisReport`
+
+`DiagnosisLLMDraft` 是不可信LLM内部草稿，只能引用 `E1`、`E2` 等临时编号。
+
+`DiagnosisReport` 是公开响应，包含：
+
+- 请求、Prompt和门控版本；
+- 用户症状及来源；
+- Python从真实候选构造的证据；
+- 绑定真实Chunk ID的原因和检查项；
+- 风险、资质边界和缺失信息；
+- 拒答状态。
+
+完整字段和跨字段关系见 `docs/diagnosis-schema.md`。
 
 ## 6. 标识与可追溯设计
 
@@ -657,7 +718,131 @@ similarity = 1 - distance
 
 并检查结果处于 `[-1, 1]` 范围内。
 
-## 9. RAG 查询链路
+## 9. Week 3 混合RAG与结构化诊断链路
+
+### 9.1 共用候选证据层
+
+知识库问答和结构化诊断共用同一条候选检索与门控链，只在门控放行后的生成和响应契约上分开。
+
+```mermaid
+sequenceDiagram
+    participant Client as 调用方
+    participant Router as Knowledge/Diagnostics Router
+    participant Service as Query或Diagnosis Service
+    participant Rewrite as Query Rewriter
+    participant Vector as Embedding + Chroma
+    participant Keyword as Keyword Retriever
+    participant Fusion as RRF + Head Preservation
+    participant Gate as Hybrid Evidence Gate
+    participant LLM as Answer或Diagnosis LLM
+    participant Builder as Citation/Report Builder
+
+    Client->>Router: POST请求
+    Router->>Service: Pydantic请求 + request_id
+    Service->>Rewrite: 原始问题或现象+日志
+    Rewrite-->>Service: normalized/rewrite query
+    par 双路召回
+        Service->>Vector: Query Embedding + Top-20
+        Vector-->>Service: 向量候选
+    and
+        Service->>Keyword: 关键词Top-20
+        Keyword-->>Service: 关键词候选
+    end
+    Service->>Fusion: 两路排名
+    Fusion-->>Service: RRF融合并重排后的Top-3
+    Service->>Gate: 问题特征 + Top-3
+
+    alt 门控拒绝
+        Gate-->>Service: no_candidates或insufficient_combined_support
+        Service-->>Router: Python稳定拒答
+        Router-->>Client: abstained=true
+    else 门控放行
+        Gate-->>Service: accepted + reason
+        Service->>LLM: 只包含本次证据的结构化Prompt
+        LLM-->>Service: answer draft或diagnosis draft
+        Service->>Builder: 临时证据编号 + 真实候选
+        Builder-->>Service: 真实引用或DiagnosisReport
+        Service-->>Router: 经过Pydantic校验的响应
+        Router-->>Client: JSON
+    end
+```
+
+### 9.2 确定性归一化与查询改写
+
+`lexical_normalization.py` 先统一：
+
+- 错误码中的空格、下划线和连字符；
+- 型号别名；
+- 数字、负号、温度和时间单位；
+- 可稳定识别的中文检索词。
+
+`query_rewriting.py` 再按 `deterministic-v2` 追加领域内已知的中英文别名。该阶段不调用LLM，原因是错误码和型号属于需要稳定、可审计处理的确定性标识符。
+
+### 9.3 向量与关键词双路召回
+
+向量路径负责整体语义相近，关键词路径负责：
+
+- 错误码；
+- 产品型号；
+- 数值阈值；
+- 中文关键短语；
+- 英文专有词。
+
+两条路径都在 `retrieval_scope` 允许的文档范围内检索。范围过滤发生在Top-K选择之前，避免未授权文档先占据候选位置。
+
+### 9.4 RRF与头部保留重排
+
+RRF使用：
+
+```text
+score(document) = Σ 1 / (rank_constant + rank_in_path)
+```
+
+当前 `rank_constant=60`。RRF只使用各路径排名，不直接相加余弦相似度和关键词原始分数，因为二者不处于同一量纲。
+
+`head-preserving-v1` 在RRF之后保护：
+
+- RRF融合Top-1；
+- 向量路径Top-1；
+- 关键词路径Top-2；
+- 剩余位置按原RRF顺序补齐。
+
+这一重排不是Cross-Encoder，不重新理解语义；它解决的是Top-3窗口中两条召回路径的互补证据可能互相挤出的结构问题。
+
+### 9.5 组合证据门控
+
+`hybrid-evidence-gate-v1` 不再只看Top-1相似度。允许放行的原因包括：
+
+- `exact_identifier_support`：错误码等精确标识符得到证据支持；
+- `model_and_lexical_support`：型号与足够主题词联合支持；
+- `general_dual_path_support`：向量和关键词两条路径共同支持。
+
+拒绝原因包括：
+
+- `no_candidates`；
+- `insufficient_combined_support`。
+
+门控拒绝时不会调用生成式LLM。这样既避免弱证据猜测，也减少无意义的网络请求和费用。
+
+### 9.6 问答与诊断在生成层分流
+
+知识库问答要求LLM返回：
+
+```json
+{
+  "answer": "只根据证据生成的回答",
+  "used_evidence_ids": ["E1"],
+  "abstained": false
+}
+```
+
+结构化诊断要求LLM返回 `DiagnosisLLMDraft`。草稿中的原因和检查只能引用 `E1`、`E2` 等临时编号。`DiagnosisReportBuilder` 再从真实候选复制Chunk ID、文件名、章节、分数和正文，完成最终 `DiagnosisReport`。
+
+门控放行后，LLM仍可以因为证据冲突或不足而二次拒答。非法JSON、缺字段、未知引用、LLM超时和上游错误会转换成稳定的诊断降级报告。
+
+## 附录 A：Week 2 纯向量查询链路（历史设计）
+
+以下内容保留用于说明Week 2基线。当前知识库问答和诊断API已经使用上面的Week 3混合链路。
 
 ```mermaid
 sequenceDiagram
@@ -692,7 +877,7 @@ sequenceDiagram
     end
 ```
 
-### 9.1 Query Embedding
+### A.1 Query Embedding
 
 文档摄取和查询必须使用同一个 Embedding 模型：
 
@@ -703,7 +888,7 @@ Query text    → embedding-3
 
 只有这样，问题向量和文档向量才位于可比较的向量空间。
 
-### 9.2 为什么使用 `asyncio.to_thread()`
+### A.2 为什么使用 `asyncio.to_thread()`
 
 Chroma 客户端是同步接口。
 
@@ -724,7 +909,7 @@ retrieved_chunks = await asyncio.to_thread(
 
 这不会让 Chroma 本身变成异步数据库，但能减少同步调用对其他请求的影响。
 
-### 9.3 `retrieval_ms` 的边界
+### A.3 `retrieval_ms` 的边界
 
 `retrieval_ms` 包含：
 
@@ -742,9 +927,9 @@ LLM生成
 + HTTP响应序列化
 ```
 
-### 9.4 相似度门控
+### A.4 Week 2相似度门控
 
-当前策略：
+Week 2历史策略：
 
 ```text
 Top-1 < 0.60 → 拒答
@@ -766,7 +951,7 @@ Top-1 > 0.60 → 允许回答
 
 该分支不调用生成式 LLM。
 
-### 9.5 证据约束 Prompt
+### A.5 证据约束 Prompt
 
 发送给模型的 User Message 是 JSON 数据：
 
@@ -1096,6 +1281,40 @@ Gold Question
 
 该实验用于案例分析，不替代批量评测。
 
+### 15.5 候选策略评测
+
+候选评测在生成式LLM之前运行，分别记录：
+
+- Recall@1与Recall@3；
+- Top-1和Top-3完整证据召回；
+- 每道题的预期证据和实际候选；
+- 查询改写与重排版本。
+
+最终四种策略必须使用相同Gold、Embedding、Collection和Top-K口径。当前最终策略Top-3完整证据召回为 `22/23=0.957`。
+
+### 15.6 门控评测
+
+门控评测把候选质量与放行决定组合，记录：
+
+- 可回答题放行率；
+- 放行且证据完整的比例；
+- 放行但证据不完整的题；
+- 无答案错误放行率；
+- 无答案正确拒答率。
+
+门控安全评测必须先通过，候选策略才能接入在线LLM。
+
+### 15.7 诊断Prompt对照
+
+Prompt A/B实验固定请求、候选证据、模型和temperature，只改变Prompt版本，比较：
+
+- 结构化输出成功率；
+- 非法响应、超时和上游错误；
+- 引用白名单通过率；
+- 未知证据编号数量。
+
+该实验验证Prompt和Schema的组合效果，但少量案例不替代完整Gold评测。
+
 ## 16. 测试架构
 
 测试金字塔主要包含：
@@ -1107,6 +1326,9 @@ Gold Question
 - 余弦相似度；
 - 文本切分；
 - 位置匹配；
+- 词面归一化和确定性查询改写；
+- RRF融合和头部保留重排；
+- 组合门控规则；
 - 指标计算；
 - Prompt 构造；
 - Markdown 报告渲染。
@@ -1118,8 +1340,11 @@ Gold Question
 - 摄取顺序；
 - 批处理；
 - 重复检测；
-- 阈值拒答；
+- 组合证据门控；
 - 引用白名单；
+- 诊断草稿到真实Chunk的映射；
+- 高风险资质边界；
+- 稳定拒答与生成降级；
 - 异常路径。
 
 ### 16.3 API 测试
@@ -1225,14 +1450,16 @@ JSON解析
 - 检索结果已经拥有真实元数据；
 - 代码映射可以机械测试。
 
-### 决策 4：低相似度时不调用 LLM
+### 决策 4：组合证据门控拒绝时不调用 LLM
 
 原因：
 
-- 防止无证据回答；
+- 防止无证据或组合支持不足时回答；
 - 减少模型调用费用；
 - 降低延迟；
 - 拒答行为更确定。
+
+门控不只检查Top-1相似度，还区分精确标识符、型号与主题词联合支持以及向量和关键词双路径支持。
 
 ### 决策 5：先用本地 ChromaDB
 
@@ -1258,10 +1485,10 @@ JSON解析
 ## 19. 已知架构限制
 
 - 没有 OCR 管道。
-- 没有混合关键词与向量检索。
-- 没有 Query Rewrite。
-- 没有 Reranker。
-- 阈值只按 Top-1 判断。
+- 当前查询改写使用确定性词典和规则，不能覆盖任意领域关系。
+- 当前重排是头部保留策略，不是学习型Cross-Encoder。
+- `q027` 的跨文档“设备维护 + 业务验收”关系仍未完整召回。
+- 组合门控仍会保守拒绝 `q007`。
 - 没有文档版本管理。
 - 没有独立文档目录数据库。
 - 没有后台摄取任务队列。
@@ -1277,15 +1504,14 @@ JSON解析
 推荐按以下顺序演进：
 
 ```text
-1. 完善失败语料和Gold Question
-2. 加入关键词与向量混合检索
-3. 加入Reranker
-4. 增加回答语义正确性评测
-5. 增加结构化安全约束校验
-6. 将摄取迁移到后台任务
-7. 增加认证、权限和审计
-8. 接入RCS/WMS/遥测工具
-9. 在可靠工具层之上构建Agent
+1. 为查询改写、门控和Gold数据建立显式版本
+2. 增加回答语义正确性与多轮稳定性评测
+3. 研究受控查询分解或文档关系索引
+4. 评估学习型Cross-Encoder重排
+5. 将摄取迁移到后台任务
+6. 增加认证、权限和审计
+7. 接入RCS/WMS/遥测工具
+8. 在可靠工具层之上构建Agent
 ```
 
 Agent 应建立在已经可测试的工具之上，而不是直接让模型访问所有系统并自行决定安全操作。

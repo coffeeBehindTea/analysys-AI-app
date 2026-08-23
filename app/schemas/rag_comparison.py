@@ -1,8 +1,5 @@
 """RAG与裸LLM可复现实验使用的数据契约。"""
 
-# datetime记录实验报告的生成时间。
-from datetime import datetime
-
 # Self表示当前Pydantic模型实例自身的类型，
 # 用于model_validator的返回类型标注。
 from typing import Self
@@ -108,8 +105,6 @@ class RagVsBareLLMReport(BaseModel):
         extra="forbid",
         allow_inf_nan=False,
     )
-
-    generated_at: datetime
 
     # 记录实际调用的RAG API地址，
     # 使实验请求可以由其他开发者复现。

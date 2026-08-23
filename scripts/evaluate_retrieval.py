@@ -10,9 +10,6 @@ import asyncio
 # json 用于生成机器可读取的 JSON 报告。
 import json
 
-# datetime 记录评测执行时间。
-from datetime import datetime
-
 # Path 提供面向对象的路径操作。
 from pathlib import Path
 
@@ -49,11 +46,13 @@ def parse_args() -> argparse.Namespace:
     """解析检索评测脚本的命令行参数。"""
 
     parser = argparse.ArgumentParser(
-        description=(
-            "使用真实 Embedding 和 ChromaDB "
-            "评测 20 条标注问题"
-        )
+    description=(
+        # --questions 可以指向不同规模的 Gold 文件，
+        # 因此这里不再写死题目数量。
+        "使用真实 Embedding 和 ChromaDB "
+        "评测指定的 Gold Question 数据集"
     )
+)
 
     parser.add_argument(
         "--questions",
@@ -128,7 +127,10 @@ async def evaluate_retrieval(
             "similarity_threshold 必须在 -1 到 1 之间"
         )
 
-    # 一次性收集 20 道问题的文本。
+    # 一次性收集当前Gold数据集中的全部问题文本。
+    #
+    # questions中有多少个GoldQuestion，
+    # question_texts中就应当有多少个字符串。
     question_texts = [
         question.question
         for question in questions
@@ -154,10 +156,11 @@ async def evaluate_retrieval(
 
     question_evaluations = []
 
-    # strict=True 要求两个序列长度完全相同。
+    # strict=True要求两个序列长度完全相同。
     #
-    # 如果问题有 20 个但向量只有 19 个，
-    # zip 不会静默忽略最后一个问题。
+    # 如果问题数量和查询向量数量不一致，
+    # zip不会静默丢弃没有配对的尾部元素，
+    # 而是抛出ValueError，避免漏评问题。
     for question, query_vector in zip(
         questions,
         query_vectors,
@@ -191,8 +194,6 @@ async def evaluate_retrieval(
     )
 
     return RetrievalEvaluationReport(
-        # astimezone() 返回带本地时区信息的当前时间。
-        generated_at=datetime.now().astimezone(),
         embedding_model=embedding_model,
         collection_name=collection_name,
         top_k=top_k,
@@ -254,7 +255,6 @@ def render_markdown_report(
             "自动生成。"
         ),
         "",
-        f"- 生成时间：`{report.generated_at.isoformat()}`",
         f"- Embedding 模型：`{report.embedding_model}`",
         f"- Chroma Collection：`{report.collection_name}`",
         f"- Top-K：{report.top_k}",

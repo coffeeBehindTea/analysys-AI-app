@@ -1,8 +1,5 @@
 """任务四检索评测结果数据契约测试。"""
 
-# datetime 用来构造报告生成时间；
-from datetime import datetime, timezone
-
 import pytest
 
 # ValidationError 是 Pydantic 在模型数据
@@ -86,8 +83,6 @@ def make_valid_report() -> RetrievalEvaluationReport:
     )
 
     return RetrievalEvaluationReport(
-        # datetime.now(timezone.utc) 返回带时区的当前时间。
-        generated_at=datetime.now(timezone.utc),
         embedding_model="embedding-3",
         collection_name="robot_knowledge",
         top_k=3,
@@ -178,11 +173,10 @@ def test_report_can_be_serialized_for_json() -> None:
 
     report = make_valid_report()
 
-    # mode="json" 会把 datetime 等 Python 对象
-    # 转换为 JSON 可以表示的数据类型。
+    # mode="json"递归转换成JSON可以表示的数据类型。
     serialized = report.model_dump(mode="json")
 
-    assert isinstance(serialized["generated_at"], str)
+    assert "generated_at" not in serialized
     assert serialized["metrics"]["recall_at_3"] == 1.0
     assert (
         serialized["results"][0]["question_id"]

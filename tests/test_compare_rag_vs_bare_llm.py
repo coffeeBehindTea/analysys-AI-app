@@ -4,12 +4,6 @@
 # 也用于验证写出的JSON报告可以重新解析。
 import json
 
-# datetime用于构造固定的报告生成时间。
-#
-# 测试使用固定时间，不使用当前时间，
-# 可以让测试结果保持稳定。
-from datetime import datetime
-
 # Path用于标注pytest临时目录参数的类型。
 from pathlib import Path
 
@@ -282,11 +276,6 @@ def make_comparison_report(
     q020 = make_q020_gold()
 
     return RagVsBareLLMReport(
-        # 使用固定且带时区的时间，
-        # 避免测试依赖当前机器时间。
-        generated_at=datetime.fromisoformat(
-            "2026-08-15T10:00:00+08:00"
-        ),
         rag_api_url=API_URL,
         llm_model="test-llm",
         embedding_model="embedding-3",
@@ -870,6 +859,7 @@ def test_render_markdown_report_contains_both_groups(
         "# RAG 与裸 LLM 对照实验"
         in markdown
     )
+    assert "生成时间" not in markdown
     assert "test-llm" in markdown
     assert "embedding-3" in markdown
     assert (

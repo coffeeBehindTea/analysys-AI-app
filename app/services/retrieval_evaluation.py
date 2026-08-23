@@ -2,13 +2,26 @@
 
 import re
 
+# Sequence表示可以重复遍历、按顺序保存元素的只读序列。
+#
+# 这里不用list，是因为证据匹配函数不需要修改调用方列表；
+# 也不用普通Iterable，因为一个生成器可能只能遍历一次。
+from collections.abc import Sequence
+
+# Protocol定义结构化能力契约，
+# 具体结果类型不必显式继承它。
+from typing import Protocol
+
 from app.schemas.evaluation import (
     ExpectedEvidence,
     GoldQuestion,
     RetrievalMetrics,
     RetrievalQuestionEvaluation,
 )
-from app.schemas.retrieval import RetrievedChunk
+from app.schemas.retrieval import (
+    DocumentChunk,
+    RetrievedChunk,
+)
 
 
 # 匹配类似下面的位置：
@@ -22,6 +35,18 @@ PAGE_LOCATION_PATTERN = re.compile(
     r"\bpage\s*:\s*(\d+)\b",
     re.IGNORECASE,
 )
+
+
+class EvidenceBearingResult(
+    Protocol
+):
+    """证据匹配只需要结果对象能够提供DocumentChunk。"""
+
+    @property
+    def chunk(self) -> DocumentChunk:
+        """返回包含正文、来源文件和位置的Chunk。"""
+
+        ...
 
 
 def normalize_location(location: str) -> str:
@@ -115,7 +140,7 @@ def location_matches(
 
 
 def evidence_matches(
-    result: RetrievedChunk,
+    result: EvidenceBearingResult,
     expected: ExpectedEvidence,
 ) -> bool:
     """判断一条检索结果是否命中一项预期证据。"""
@@ -141,8 +166,12 @@ def evidence_matches(
 
 
 def count_matched_evidence(
-    results: list[RetrievedChunk],
-    expected_evidence: list[ExpectedEvidence],
+    results: Sequence[
+        EvidenceBearingResult
+    ],
+    expected_evidence: Sequence[
+        ExpectedEvidence
+    ],
 ) -> int:
     """统计一组结果命中了多少项不同的预期证据。"""
 

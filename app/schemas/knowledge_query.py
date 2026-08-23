@@ -94,10 +94,35 @@ class KnowledgeCitation(BaseModel):
         description="该Chunk在本次检索中的排名",
     )
 
-    similarity: float = Field(
+    # 纯向量候选和进入向量路径的混合候选
+    # 都具有真实余弦相似度。
+    #
+    # 关键词独占候选没有进入本次向量候选集合，
+    # 因此必须使用None表达“没有该测量值”，
+    # 不能伪造成0.0。
+    similarity: float | None = Field(
+        default=None,
         ge=-1.0,
         le=1.0,
-        description="问题与该Chunk的余弦相似度",
+        description=(
+            "问题与该Chunk的余弦相似度；"
+            "关键词独占候选为空"
+        ),
+    )
+
+    # rrf_score是倒数排名融合分数。
+    #
+    # 它只解释混合检索的最终排序，
+    # 不是余弦相似度、概率或答案置信度。
+    #
+    # 纯向量基线没有执行RRF，因此使用None。
+    rrf_score: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "混合检索的RRF融合分数；"
+            "纯向量引用为空"
+        ),
     )
 
     # excerpt直接来自召回Chunk的正文。
@@ -109,6 +134,33 @@ class KnowledgeCitation(BaseModel):
         max_length=20_000,
         description="被引用Chunk的原始文本",
     )
+
+    @model_validator(mode="after")
+    def require_at_least_one_retrieval_score(
+        self,
+    ) -> Self:
+        """引用必须保留至少一种真实检索分数。"""
+
+        # similarity=0.0是合法余弦相似度，
+        # 因此不能使用：
+        #
+        # if not self.similarity
+        #
+        # 必须使用is None准确区分：
+        #
+        # 0.0  → 有真实分数；
+        # None → 没有该分数。
+        if (
+            self.similarity is None
+            and self.rrf_score is None
+        ):
+            raise ValueError(
+                "引用至少需要一种检索分数"
+            )
+
+        # mode="after"校验器必须返回
+        # 已经完成检查的当前模型对象。
+        return self
 
 
 class KnowledgeQueryResponse(BaseModel):
@@ -206,13 +258,31 @@ class KnowledgeAnswerDraft(BaseModel):
         description="只根据证据生成的回答正文",
     )
 
-    # LLM只选择临时编号。
+    # LLM只能选择本次Prompt中提供的临时证据编号。
     #
-    # 它不能在这里返回文件名、页码或Chunk ID。
+    # 正常回答时至少需要一条证据；
+    # 二次拒答时必须为空列表。
+    #
+    # 因为是否允许空列表取决于abstained字段，
+    # 所以这里不能继续使用min_length=1，
+    # 而要交给下面的model_validator执行跨字段校验。
     used_evidence_ids: list[EvidenceId] = Field(
-        min_length=1,
         max_length=10,
-        description="实际用于回答的证据编号",
+        description=(
+            "实际用于回答的证据编号；"
+            "拒答时必须为空列表"
+        ),
+    )
+
+    # abstained表示LLM在阅读门控放行的候选后，
+    # 是否仍然判断证据不足。
+    #
+    # default=False用于兼容现有正常回答构造代码。
+    abstained: bool = Field(
+        default=False,
+        description=(
+            "LLM是否因候选证据不足而拒答"
+        ),
     )
 
     @field_validator("used_evidence_ids")
@@ -231,3 +301,32 @@ class KnowledgeAnswerDraft(BaseModel):
             )
 
         return evidence_ids
+
+    @model_validator(mode="after")
+    def validate_abstention_contract(
+        self,
+    ) -> Self:
+        """检查回答状态与证据编号之间的关系。"""
+
+        # 拒答表示没有证据足以支持答案，
+        # 因此不能同时声称使用了某条证据。
+        if (
+            self.abstained
+            and self.used_evidence_ids
+        ):
+            raise ValueError(
+                "拒答草稿不能选择证据"
+            )
+
+        # 非拒答表示模型生成了正式答案，
+        # 因此必须至少选择一条真实候选证据。
+        if (
+            not self.abstained
+            and not self.used_evidence_ids
+        ):
+            raise ValueError(
+                "非拒答草稿必须选择至少一条证据"
+            )
+
+        # mode="after"校验器必须返回当前模型实例。
+        return self

@@ -652,19 +652,27 @@ async def test_query_knowledge_returns_answer_and_citations(
     citation = KnowledgeCitation(
         chunk_id=f"{'a' * 64}:000003",
         document_id="a" * 64,
-        source_file="safety-manual.pdf",
-        page_or_section="page: 12",
+        source_file="robot-faults.txt",
+        page_or_section=(
+            "section: ERR-NET-4001"
+        ),
         chunk_index=3,
-        rank=1,
-        similarity=0.82,
+        rank=2,
+
+        # 模拟一个只被关键词路径召回的融合候选。
+        # 没有向量测量值时必须返回None，
+        # JSON序列化后会成为null。
+        similarity=None,
+        rrf_score=0.016129,
         excerpt=(
-            "急停装置复位后，应检查"
-            "安全控制系统状态。"
+            "ERR-NET-4001表示心跳包超时。"
         ),
     )
 
     expected_response = KnowledgeQueryResponse(
-        answer="应检查安全控制系统状态。",
+        answer=(
+            "网络恢复后需要先核对任务状态。"
+        ),
         citations=[citation],
         retrieval_ms=35.6,
         abstained=False,

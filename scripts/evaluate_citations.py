@@ -12,9 +12,6 @@ import asyncio
 # json负责生成机器可读取的JSON报告。
 import json
 
-# datetime用于记录报告生成时间。
-from datetime import datetime
-
 from pathlib import Path
 
 # httpx提供异步HTTP客户端、响应对象和异常类型。
@@ -47,6 +44,29 @@ from app.schemas.evaluation import (
 # KnowledgeQueryResponse表示知识库查询API的响应契约。
 from app.schemas.knowledge_query import (
     KnowledgeQueryResponse,
+)
+
+# CandidateStrategyParameters保存候选检索策略的
+# 完整、经过Pydantic校验的参数。
+from app.schemas.retrieval_strategy import (
+    CandidateStrategyParameters,
+)
+
+# 直接从真实混合检索实现中读取默认参数，
+# 避免评测脚本另外硬编码20和60后发生漂移。
+from app.services.hybrid_retrieval import (
+    DEFAULT_HYBRID_CANDIDATE_K,
+    DEFAULT_RRF_RANK_CONSTANT,
+)
+
+# 门控版本必须与在线API实际使用的规则一致。
+from app.services.hybrid_retrieval_gate import (
+    HYBRID_EVIDENCE_GATE_VERSION,
+)
+
+# 查询改写版本直接来自确定性改写实现。
+from app.services.query_rewriting import (
+    DETERMINISTIC_QUERY_REWRITE_VERSION,
 )
 
 # get_embedding_model()读取并验证EMBEDDING_MODEL。
@@ -91,7 +111,22 @@ async def evaluate_citations_via_api(
     embedding_model: str,
     collection_name: str,
     top_k: int,
-    similarity_threshold: float,
+
+    # None表示兼容旧版纯向量报告。
+    #
+    # Week 3真实评测会传入
+    # hybrid_rrf_rewrite完整参数。
+    retrieval_parameters: (
+        CandidateStrategyParameters | None
+    ) = None,
+
+    # 纯向量报告填写实际阈值；
+    # 混合门控报告必须填写None。
+    similarity_threshold: float | None = None,
+
+    # 混合门控报告必须记录版本；
+    # 纯向量报告保持None。
+    gate_version: str | None = None,
 ) -> CitationEvaluationReport:
     """调用知识库API并生成结构化引用评测报告。"""
 
@@ -106,11 +141,123 @@ async def evaluate_citations_via_api(
             "top_k必须在1到10之间"
         )
 
-    if not 0.0 <= similarity_threshold <= 1.0:
-        raise ValueError(
-            "similarity_threshold"
-            "必须在0到1之间"
+    # Protocol和类型标注不会执行运行时检查。
+    #
+    # 在发送28次HTTP请求之前检查策略参数类型，
+    # 避免全部请求结束后才发现报告无法创建。
+    if (
+        retrieval_parameters is not None
+        and not isinstance(
+            retrieval_parameters,
+            CandidateStrategyParameters,
         )
+    ):
+        raise TypeError(
+            "retrieval_parameters必须是"
+            "CandidateStrategyParameters或None"
+        )
+
+    # None表示当前策略没有单一全局相似度阈值。
+    #
+    # 如果调用方确实提供阈值，
+    # 就必须检查类型和值域。
+    if similarity_threshold is not None:
+        # bool是int的子类，但True不能代表
+        # 一个有意义的检索阈值。
+        if (
+            isinstance(
+                similarity_threshold,
+                bool,
+            )
+            or not isinstance(
+                similarity_threshold,
+                (int, float),
+            )
+        ):
+            raise TypeError(
+                "similarity_threshold必须是"
+                "数值或None"
+            )
+
+        if not (
+            0.0
+            <= float(similarity_threshold)
+            <= 1.0
+        ):
+            raise ValueError(
+                "similarity_threshold"
+                "必须在0到1之间"
+            )
+
+    if (
+        gate_version is not None
+        and not isinstance(
+            gate_version,
+            str,
+        )
+    ):
+        raise TypeError(
+            "gate_version必须是字符串或None"
+        )
+
+    if retrieval_parameters is None:
+        # 没有策略参数时，按照Week 2旧版
+        # 纯向量报告处理。
+        if similarity_threshold is None:
+            raise ValueError(
+                "旧版纯向量报告必须设置"
+                "similarity_threshold"
+            )
+
+        if gate_version is not None:
+            raise ValueError(
+                "未声明混合检索参数时"
+                "不能设置gate_version"
+            )
+    else:
+        # HTTP请求中的top_k和策略参数中的top_k
+        # 必须描述同一次实验。
+        if (
+            retrieval_parameters.top_k
+            != top_k
+        ):
+            raise ValueError(
+                "retrieval_parameters.top_k"
+                "必须与报告top_k一致"
+            )
+
+        if (
+            retrieval_parameters.strategy
+            == "vector_baseline"
+        ):
+            if similarity_threshold is None:
+                raise ValueError(
+                    "纯向量报告必须设置"
+                    "similarity_threshold"
+                )
+
+            if gate_version is not None:
+                raise ValueError(
+                    "纯向量报告不能设置"
+                    "gate_version"
+                )
+        else:
+            # hybrid_rrf和hybrid_rrf_rewrite
+            # 都使用组合证据门控。
+            if similarity_threshold is not None:
+                raise ValueError(
+                    "混合检索报告不能设置"
+                    "similarity_threshold"
+                )
+
+            if (
+                gate_version is None
+                or not gate_version.strip()
+            ):
+                raise ValueError(
+                    "混合检索报告必须设置"
+                    "gate_version"
+                )
 
     # 在发出任何HTTP请求前检查实验元数据。
     #
@@ -262,10 +409,6 @@ async def evaluate_citations_via_api(
     )
 
     return CitationEvaluationReport(
-        # astimezone()返回带本地时区信息的当前时间。
-        generated_at=(
-            datetime.now().astimezone()
-        ),
         api_url=cleaned_metadata["api_url"],
         llm_model=cleaned_metadata["llm_model"],
         embedding_model=(
@@ -275,9 +418,21 @@ async def evaluate_citations_via_api(
             cleaned_metadata["collection_name"]
         ),
         top_k=top_k,
+
+        # 保存完整候选策略参数。
+        retrieval_parameters=(
+            retrieval_parameters
+        ),
+
+        # 纯向量报告为float；
+        # 混合报告为None。
         similarity_threshold=(
             similarity_threshold
         ),
+
+        # 混合报告保存门控版本。
+        gate_version=gate_version,
+
         metrics=metrics,
         results=question_evaluations,
     )
@@ -409,6 +564,64 @@ def render_markdown_report(
 
     metrics = report.metrics
 
+    # 根据报告实际策略动态生成元数据行。
+    #
+    # 不能对None执行：
+    #
+    # f"{None:.3f}"
+    #
+    # 否则会产生当前测试发现的TypeError。
+    strategy_lines: list[str] = []
+
+    parameters = report.retrieval_parameters
+
+    if parameters is None:
+        # 没有嵌套参数表示兼容旧版纯向量报告。
+        strategy_lines.append(
+            "- 检索策略："
+            "`vector_baseline`（兼容旧报告）"
+        )
+    else:
+        strategy_lines.append(
+            "- 检索策略："
+            f"`{parameters.strategy}`"
+        )
+
+        # 混合策略必须保存单路候选深度。
+        if parameters.candidate_k is not None:
+            strategy_lines.append(
+                "- 单路候选深度："
+                f"{parameters.candidate_k}"
+            )
+
+        # 混合策略必须保存RRF排名常数。
+        if parameters.rank_constant is not None:
+            strategy_lines.append(
+                "- RRF排名常数："
+                f"{parameters.rank_constant}"
+            )
+
+        # 只有查询改写策略具有改写版本。
+        if parameters.rewrite_version is not None:
+            strategy_lines.append(
+                "- 查询改写版本："
+                f"`{parameters.rewrite_version}`"
+            )
+
+    # 纯向量报告显示单一相似度阈值。
+    if report.similarity_threshold is not None:
+        strategy_lines.append(
+            "- 相似度拒答阈值："
+            f"{report.similarity_threshold:.3f}"
+        )
+
+    # 混合门控报告显示门控版本。
+    if report.gate_version is not None:
+        strategy_lines.append(
+            "- 证据门控版本："
+            f"`{report.gate_version}`"
+        )
+
     lines: list[str] = [
         "# Day 5–7 RAG回答引用评测",
         "",
@@ -418,16 +631,16 @@ def render_markdown_report(
             "调用真实知识库HTTP API生成。"
         ),
         "",
-        f"- 生成时间：`{report.generated_at.isoformat()}`",
         f"- API：`{report.api_url}`",
         f"- LLM模型：`{report.llm_model}`",
         f"- Embedding模型：`{report.embedding_model}`",
         f"- Chroma Collection：`{report.collection_name}`",
         f"- Top-K：{report.top_k}",
-        (
-            "- 相似度拒答阈值："
-            f"{report.similarity_threshold:.3f}"
-        ),
+
+        # 星号把strategy_lines中的每一个字符串
+        # 分别展开成lines列表中的独立元素。
+        *strategy_lines,
+
         "",
         "## 汇总指标",
         "",
@@ -823,6 +1036,24 @@ async def run_real_evaluation(
         settings
     )
 
+    # 这些参数必须与在线API依赖工厂
+    # 实际装配的默认策略完全一致。
+    retrieval_parameters = (
+        CandidateStrategyParameters(
+            strategy="hybrid_rrf_rewrite",
+            top_k=top_k,
+            candidate_k=(
+                DEFAULT_HYBRID_CANDIDATE_K
+            ),
+            rank_constant=(
+                DEFAULT_RRF_RANK_CONSTANT
+            ),
+            rewrite_version=(
+                DETERMINISTIC_QUERY_REWRITE_VERSION
+            ),
+        )
+    )
+
     # httpx.Timeout为每次HTTP请求设置超时约束。
     #
     # 设置120秒，是因为知识库API内部可能依次执行：
@@ -847,12 +1078,17 @@ async def run_real_evaluation(
             ),
             top_k=top_k,
 
-            # 评测脚本不能通过查询请求临时修改服务端阈值。
-            #
-            # 因此这里记录与本地FastAPI服务相同的
-            # RAG_SIMILARITY_THRESHOLD配置。
-            similarity_threshold=(
-                settings.rag_similarity_threshold
+            # 保存真实在线候选策略参数。
+            retrieval_parameters=(
+                retrieval_parameters
+            ),
+
+            # 混合门控不使用单一全局相似度阈值。
+            similarity_threshold=None,
+
+            # 保存在线API实际使用的门控规则版本。
+            gate_version=(
+                HYBRID_EVIDENCE_GATE_VERSION
             ),
         )
 

@@ -1,8 +1,5 @@
 """RAG与裸LLM对比实验数据契约的离线测试。"""
 
-# datetime和timezone用于构造带UTC时区的报告时间。
-from datetime import datetime, timezone
-
 import pytest
 
 # ValidationError表示输入没有通过Pydantic契约校验。
@@ -210,9 +207,6 @@ def make_report(
     """使用指定实验Case创建完整报告。"""
 
     return RagVsBareLLMReport(
-        generated_at=datetime.now(
-            timezone.utc
-        ),
         rag_api_url=(
             "http://127.0.0.1:8000"
             "/api/v1/knowledge/query"
@@ -273,16 +267,12 @@ def test_valid_report_preserves_both_experiment_groups(
     assert q020_case.rag_response.abstained is True
     assert q020_case.rag_response.citations == []
 
-    # mode="json"将datetime转换成JSON可表示的字符串，
-    # 并递归序列化所有嵌套Pydantic模型。
+    # mode="json"递归序列化所有嵌套Pydantic模型。
     serialized = report.model_dump(
         mode="json"
     )
 
-    assert isinstance(
-        serialized["generated_at"],
-        str,
-    )
+    assert "generated_at" not in serialized
     assert (
         serialized["cases"][0]
         ["rag_response"]["citations"][0]

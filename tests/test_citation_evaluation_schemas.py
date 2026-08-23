@@ -1,7 +1,5 @@
 """最终RAG引用评测Schema的离线测试。"""
 
-from datetime import datetime, timezone
-
 import pytest
 
 # ValidationError表示传入数据没有通过
@@ -27,6 +25,9 @@ from app.schemas.evaluation import (
 from app.schemas.knowledge_query import (
     KnowledgeCitation,
     KnowledgeQueryResponse,
+)
+from app.schemas.retrieval_strategy import (
+    CandidateStrategyParameters,
 )
 
 
@@ -418,14 +419,6 @@ def make_valid_report(
     """创建包含q005和q020的合法评测报告。"""
 
     return CitationEvaluationReport(
-        # datetime.now(timezone.utc)返回带UTC时区的当前时间。
-        #
-        # 带时区时间比普通datetime.now()更明确，
-        # 不会让报告读取者猜测时间属于哪个时区。
-        generated_at=datetime.now(
-            timezone.utc
-        ),
-
         api_url=(
             "http://127.0.0.1:8000"
             "/api/v1/knowledge/query"
@@ -556,9 +549,137 @@ def test_report_accepts_matching_result_count(
         == "q020"
     )
 
-    # datetime对象带有时区时，
-    # tzinfo不会是None。
-    assert report.generated_at.tzinfo is not None
+    # 用户要求报告不得保存生成时间。
+    assert "generated_at" not in report.model_dump()
+
+
+def test_report_accepts_hybrid_strategy_metadata(
+) -> None:
+    """混合在线评测应保存完整候选参数和门控版本。"""
+
+    report_data = (
+        make_valid_report().model_dump()
+    )
+
+    report_data["retrieval_parameters"] = (
+        CandidateStrategyParameters(
+            strategy="hybrid_rrf_rewrite",
+            top_k=3,
+            candidate_k=20,
+            rank_constant=60,
+            rewrite_version="deterministic-v1",
+        )
+    )
+
+    # 混合门控不再使用一个全局相似度阈值。
+    report_data["similarity_threshold"] = None
+    report_data["gate_version"] = (
+        "hybrid-evidence-gate-v1"
+    )
+
+    report = (
+        CitationEvaluationReport.model_validate(
+            report_data
+        )
+    )
+
+    assert report.retrieval_parameters is not None
+    assert (
+        report.retrieval_parameters.strategy
+        == "hybrid_rrf_rewrite"
+    )
+    assert report.similarity_threshold is None
+    assert report.gate_version == (
+        "hybrid-evidence-gate-v1"
+    )
+
+
+def test_hybrid_report_requires_gate_version(
+) -> None:
+    """混合在线报告缺少门控版本时必须被拒绝。"""
+
+    report_data = (
+        make_valid_report().model_dump()
+    )
+    report_data["retrieval_parameters"] = {
+        "strategy": "hybrid_rrf_rewrite",
+        "top_k": 3,
+        "candidate_k": 20,
+        "rank_constant": 60,
+        "rewrite_version": "deterministic-v1",
+    }
+    report_data["similarity_threshold"] = None
+    report_data["gate_version"] = None
+
+    with pytest.raises(
+        ValidationError,
+        match="混合检索报告必须设置gate_version",
+    ):
+        CitationEvaluationReport.model_validate(
+            report_data
+        )
+
+
+def test_hybrid_report_rejects_single_similarity_threshold(
+) -> None:
+    """混合门控报告不能冒充单一相似度阈值策略。"""
+
+    report_data = (
+        make_valid_report().model_dump()
+    )
+    report_data["retrieval_parameters"] = {
+        "strategy": "hybrid_rrf_rewrite",
+        "top_k": 3,
+        "candidate_k": 20,
+        "rank_constant": 60,
+        "rewrite_version": "deterministic-v1",
+    }
+    report_data["similarity_threshold"] = 0.70
+    report_data["gate_version"] = (
+        "hybrid-evidence-gate-v1"
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "混合检索报告不能设置"
+            "similarity_threshold"
+        ),
+    ):
+        CitationEvaluationReport.model_validate(
+            report_data
+        )
+
+
+def test_report_rejects_mismatched_strategy_top_k(
+) -> None:
+    """报告Top-K必须与候选策略参数中的Top-K一致。"""
+
+    report_data = (
+        make_valid_report().model_dump()
+    )
+    report_data["retrieval_parameters"] = {
+        "strategy": "hybrid_rrf_rewrite",
+        "top_k": 5,
+        "candidate_k": 20,
+        "rank_constant": 60,
+        "rewrite_version": "deterministic-v1",
+    }
+    report_data["similarity_threshold"] = None
+    report_data["gate_version"] = (
+        "hybrid-evidence-gate-v1"
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "retrieval_parameters.top_k"
+            "必须与报告top_k一致"
+        ),
+    ):
+        CitationEvaluationReport.model_validate(
+            report_data
+        )
 
 
 def test_report_rejects_result_count_mismatch(

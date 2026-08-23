@@ -11,10 +11,6 @@ from dataclasses import dataclass
 
 from openai import AsyncOpenAI
 
-# datetime 记录日志生成时间；
-# timezone.utc 表示 UTC 时区。
-from datetime import datetime, timezone
-
 from pathlib import Path
 
 from typing import Literal, Protocol
@@ -299,7 +295,6 @@ def build_ingestion_report(
     entries: list[IngestionLogEntry],
     settings: Settings,
     embedding_model: str,
-    generated_at: str,
 ) -> str:
     """把摄取结果转换成不含正文和密钥的 Markdown 日志。"""
 
@@ -319,7 +314,6 @@ def build_ingestion_report(
     lines: list[str] = [
         "# Day 3–4 文档摄取日志",
         "",
-        f"- 生成时间：`{generated_at}`",
         f"- Embedding 模型：`{embedding_model}`",
         (
             "- Chroma Collection："
@@ -446,17 +440,10 @@ async def run_ingestion(
         # close()是异步方法，用来关闭其底层 HTTP 连接池。
         await client.close()
 
-    generated_at = datetime.now(
-        timezone.utc
-    ).astimezone().isoformat(
-        timespec="seconds"
-    )
-
     return build_ingestion_report(
         entries=entries,
         settings=settings,
         embedding_model=embedding_model,
-        generated_at=generated_at,
     )
 
 

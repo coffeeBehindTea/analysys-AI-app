@@ -1,8 +1,5 @@
 """最终RAG回答的引用质量评测数据契约。"""
 
-# datetime用于记录一次评测的生成时间。
-from datetime import datetime
-
 # Self表示当前Pydantic模型自身的实例类型，
 # 用于model_validator的返回类型。
 from typing import Self
@@ -26,6 +23,17 @@ from app.schemas.evaluation import GoldQuestion
 # 实际返回的结构。
 from app.schemas.knowledge_query import (
     KnowledgeQueryResponse,
+)
+
+# CandidateStrategyParameters保存完整候选检索参数：
+#
+# 1. 策略名称；
+# 2. 最终Top-K；
+# 3. 每条检索路径的候选深度；
+# 4. RRF排名常数；
+# 5. 查询改写版本。
+from app.schemas.retrieval_strategy import (
+    CandidateStrategyParameters,
 )
 
 
@@ -526,8 +534,6 @@ class CitationEvaluationReport(BaseModel):
         allow_inf_nan=False,
     )
 
-    generated_at: datetime
-
     # 记录被评测的HTTP接口，
     # 使报告可以追溯到实际调用入口。
     api_url: str = Field(
@@ -550,14 +556,55 @@ class CitationEvaluationReport(BaseModel):
         max_length=200,
     )
 
+    # top_k表示每次在线API请求最终使用的
+    # 最大候选证据数量。
     top_k: int = Field(
         ge=1,
         le=10,
     )
 
-    similarity_threshold: float = Field(
+    # 新版报告保存完整候选检索策略参数。
+    #
+    # None用于兼容Week 2已经生成的旧报告：
+    # 旧报告没有这个字段，只记录单一相似度阈值。
+    retrieval_parameters: (
+        CandidateStrategyParameters | None
+    ) = Field(
+        default=None,
+        description=(
+            "候选检索策略和完整参数；"
+            "旧版纯向量报告可以为空"
+        ),
+    )
+
+    # 纯向量基线使用单一余弦相似度阈值。
+    #
+    # 混合门控综合错误码、型号、关键词、
+    # 向量相似度和双路命中，因此没有一个
+    # 可以代表整个门控策略的全局阈值。
+    similarity_threshold: float | None = Field(
+        default=None,
         ge=0.0,
         le=1.0,
+        description=(
+            "纯向量报告使用的相似度拒答阈值；"
+            "混合门控报告为空"
+        ),
+    )
+
+    # 门控版本说明在线回答使用了哪一套
+    # 组合证据放行规则。
+    #
+    # 纯向量基线没有HybridEvidenceGate，
+    # 所以该字段必须为空。
+    gate_version: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description=(
+            "混合证据门控策略版本；"
+            "纯向量报告为空"
+        ),
     )
 
     metrics: CitationMetrics
@@ -569,11 +616,12 @@ class CitationEvaluationReport(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_result_count(
+    def validate_report_contract(
         self,
     ) -> Self:
-        """报告结果数量必须等于汇总问题数量。"""
+        """校验逐题数量和检索策略元数据组合。"""
 
+        # 报告逐题结果数量必须与汇总指标一致。
         if (
             len(self.results)
             != self.metrics.total_question_count
@@ -581,5 +629,81 @@ class CitationEvaluationReport(BaseModel):
             raise ValueError(
                 "逐题结果数量与汇总问题数量不一致"
             )
+
+        parameters = self.retrieval_parameters
+
+        # 没有retrieval_parameters表示这是
+        # Week 2格式的旧纯向量报告。
+        #
+        # 为了保持旧报告和旧实验可解析，
+        # 这里继续允许这种格式，
+        # 但必须提供原来的相似度阈值。
+        if parameters is None:
+            if self.similarity_threshold is None:
+                raise ValueError(
+                    "旧版纯向量报告必须设置"
+                    "similarity_threshold"
+                )
+
+            if self.gate_version is not None:
+                raise ValueError(
+                    "未声明混合检索参数时"
+                    "不能设置gate_version"
+                )
+
+            return self
+
+        # 顶层top_k表示真实HTTP请求参数；
+        # 嵌套参数中的top_k表示候选策略参数。
+        #
+        # 二者不同会导致报告无法复现。
+        if parameters.top_k != self.top_k:
+            raise ValueError(
+                "retrieval_parameters.top_k"
+                "必须与报告top_k一致"
+            )
+
+        if parameters.strategy == "vector_baseline":
+            # 新格式也允许显式声明纯向量基线。
+            #
+            # 纯向量基线必须记录实际拒答阈值。
+            if self.similarity_threshold is None:
+                raise ValueError(
+                    "纯向量报告必须设置"
+                    "similarity_threshold"
+                )
+
+            # 纯向量Service没有组合证据门控版本。
+            if self.gate_version is not None:
+                raise ValueError(
+                    "纯向量报告不能设置gate_version"
+                )
+
+            return self
+
+        # 到这里，策略只能是：
+        #
+        # hybrid_rrf
+        # 或
+        # hybrid_rrf_rewrite
+        #
+        # 这两种策略都不能被描述成
+        # 一个单一相似度阈值门控。
+        if self.similarity_threshold is not None:
+            raise ValueError(
+                "混合检索报告不能设置"
+                "similarity_threshold"
+            )
+
+        # 混合候选策略只负责召回和排序；
+        # 是否进入LLM由HybridEvidenceGate决定。
+        #
+        # 因此最终在线回答报告必须记录门控版本。
+        if self.gate_version is None:
+            raise ValueError(
+                "混合检索报告必须设置gate_version"
+            )
+
+        return self
 
         return self

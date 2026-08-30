@@ -18,6 +18,14 @@ from app.routers.knowledge import (
 from app.routers.diagnostics import (
     router as diagnostics_router,
 )
+# 导入Robot Diagnostic Agent路由。
+#
+# 此处只是取得已经定义好的APIRouter对象，
+# 不会执行Agent、工具或LLM请求。
+from app.routers.agent import (
+    router as agent_router,
+)
+
 
 def create_app() -> FastAPI:
     """创建并装配完整的 FastAPI 应用。"""
@@ -52,6 +60,13 @@ def create_app() -> FastAPI:
     # 注册证据约束结构化诊断接口。
     application.include_router(
         diagnostics_router
+    )
+    # 把Agent Router中的路径合并到FastAPI主应用。
+    #
+    # 注册后主应用才能识别：
+    # POST /api/v1/agent/diagnose
+    application.include_router(
+        agent_router
     )
 
     return application

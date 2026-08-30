@@ -17,6 +17,14 @@ from fastapi import Depends
 # AsyncOpenAI 是 OpenAI Python SDK 的异步客户端类型。
 from openai import AsyncOpenAI
 
+from datetime import (
+    datetime,
+    timezone,
+)
+from functools import (
+    lru_cache,
+)
+
 from app.config import Settings, get_settings
 from app.services.llm_client import create_llm_client, get_llm_model
 from app.services.triage import TriageService
@@ -41,6 +49,42 @@ from app.services.embedding_client import (
     get_embedding_model,
 )
 
+from app.agent.demo_telemetry import (
+    build_demo_robot_telemetry_store,
+)
+from app.agent.evidence_store import (
+    ConfirmedEvidenceStore,
+)
+from app.agent.executor import (
+    ToolExecutor,
+)
+# OpenAICompatibleAgentPlanner把OpenAI兼容SDK响应
+# 转换成Runner认识的AgentPlannerDecision。
+from app.agent.openai_planner import (
+    OpenAICompatibleAgentPlanner,
+)
+
+# AgentRunner负责规划、工具执行和观察的受控循环。
+from app.agent.runner import (
+    AgentRunner,
+)
+from app.agent.registry import (
+    ToolRegistry,
+)
+from app.agent.tools import (
+    DRAFT_TEST_CASE_TOOL_DEFINITION,
+    GET_CURRENT_TIME_TOOL_DEFINITION,
+    GET_ROBOT_TELEMETRY_TOOL_DEFINITION,
+    SEARCH_KNOWLEDGE_TOOL_DEFINITION,
+    DraftTestCaseToolHandler,
+    GetCurrentTimeToolHandler,
+    GetRobotTelemetryToolHandler,
+    InMemoryRobotTelemetryStore,
+    SearchKnowledgeToolHandler,
+    SystemUtcClock,
+)
+
+
 from app.services.knowledge_answer import (
     OpenAIKnowledgeAnswerProvider,
 )
@@ -56,6 +100,11 @@ from app.services.diagnosis_generation import (
 )
 from app.services.diagnosis_service import (
     DiagnosisService,
+)
+# AgentDiagnosisService负责把AgentRunner结果、
+# 工具观察、证据白名单和公开响应组合起来。
+from app.services.agent_diagnosis_service import (
+    AgentDiagnosisService,
 )
 from app.services.gated_hybrid_retrieval import (
     GatedHybridRetriever,
@@ -394,6 +443,53 @@ def build_gated_hybrid_retrieval_provider(
     )
 
 
+def get_agent_search_retrieval_provider(
+    # search_knowledge仍然需要Embedding，
+    # 因为查询文本必须转换成与文档相同向量空间中的向量。
+    embedding_client: Annotated[
+        AsyncOpenAI,
+        Depends(get_embedding_client),
+    ],
+
+    # 同一个VectorStore同时提供：
+    #
+    # 1. Chroma向量召回；
+    # 2. 全部Chunk正文，用于建立内存关键词索引。
+    vector_store: Annotated[
+        ChromaVectorStore,
+        Depends(get_vector_store),
+    ],
+
+    # Settings提供Embedding模型名称、
+    # Collection路径和检索相关配置。
+    settings: Annotated[
+        Settings,
+        Depends(get_settings),
+    ],
+) -> GatedHybridRetriever:
+    """装配Agent search_knowledge使用的纯检索链。
+
+    当前依赖只创建：
+
+    EmbeddingService
+    → KeywordRetriever
+    → HybridRetriever
+    → QueryRewritingHybridRetriever
+    → GatedHybridRetriever
+
+    它不会创建OpenAIKnowledgeAnswerProvider，
+    因而search_knowledge内部不会再次调用生成式LLM。
+    """
+
+    # 复用第三周已经过召回评测和安全门控评测的
+    # 通用检索工厂，避免为Agent复制第二套检索参数。
+    return build_gated_hybrid_retrieval_provider(
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+        settings=settings,
+    )
+
+
 def build_diagnosis_retrieval_provider(
     *,
     embedding_client: AsyncOpenAI,
@@ -484,3 +580,305 @@ def get_diagnosis_service(
         retrieval_provider=gated_retriever,
         draft_provider=draft_provider,
     )
+
+
+@lru_cache(maxsize=1)
+def get_robot_telemetry_store(
+) -> InMemoryRobotTelemetryStore:
+    """创建并缓存当前进程的教学模拟遥测Store。
+
+    第一次调用时创建三条快照；
+    后续调用返回同一个Store实例，
+    不会把观测时间伪装成每次查询时的实时数据。
+    """
+
+    # datetime.now(timezone.utc)取得带UTC时区的当前时间。
+    #
+    # 该时间表示模拟快照集合的创建时间，
+    # 不是从真实机器人采集到的设备时间。
+    observed_at = datetime.now(
+        timezone.utc
+    )
+
+    return build_demo_robot_telemetry_store(
+        observed_at=observed_at
+    )
+
+
+def get_system_utc_clock(
+) -> SystemUtcClock:
+    """创建读取应用服务器UTC时间的系统时钟。
+
+    SystemUtcClock本身不保存时间值；
+    每次调用now_utc()都会重新读取当前系统时钟。
+    """
+
+    return SystemUtcClock()
+
+
+def get_confirmed_evidence_store(
+) -> ConfirmedEvidenceStore:
+    """为一次Agent请求创建独立的空证据白名单。
+
+    本依赖不能使用lru_cache。FastAPI会在同一次请求内复用
+    这个对象，但下一次HTTP请求必须获得新的空Store，避免
+    不同用户或不同Agent任务之间共享已确认引用。
+    """
+
+    return ConfirmedEvidenceStore()
+
+
+def get_agent_tool_registry(
+    # Agent搜索工具只依赖门控混合检索器，
+    # 不再依赖完整的HybridKnowledgeQueryService。
+    knowledge_retrieval_provider: Annotated[
+        GatedHybridRetriever,
+        Depends(
+            get_agent_search_retrieval_provider
+        ),
+    ],
+
+    # 模拟遥测Store由进程级缓存依赖提供。
+    telemetry_store: Annotated[
+        InMemoryRobotTelemetryStore,
+        Depends(get_robot_telemetry_store),
+    ],
+
+    # search_knowledge把真实引用写入这个请求级Store；
+    # draft_test_case只能使用这里已经存在的Chunk ID。
+    confirmed_evidence_store: Annotated[
+        ConfirmedEvidenceStore,
+        Depends(get_confirmed_evidence_store),
+    ],
+
+    # 时间工具使用可被测试Fake替换的系统时钟。
+    utc_clock: Annotated[
+        SystemUtcClock,
+        Depends(get_system_utc_clock),
+    ],
+) -> ToolRegistry:
+    """注册当前Agent允许调用的只读工具。
+
+    本函数只连接已经创建好的依赖和明确允许的工具。
+
+    它不会根据LLM返回的任意字符串：
+    1. 导入Python模块；
+    2. 查找Python函数；
+    3. 创建新工具；
+    4. 绕过工具白名单。
+    """
+
+    registry = ToolRegistry()
+
+    # search_knowledge直接使用门控混合检索器。
+    #
+    # 工具只返回supporting_chunk_ids对应的真实引用，
+    # 不再在工具内部调用知识回答LLM。
+    registry.register(
+        definition=(
+            SEARCH_KNOWLEDGE_TOOL_DEFINITION
+        ),
+        handler=SearchKnowledgeToolHandler(
+            retrieval_provider=(
+                knowledge_retrieval_provider
+            ),
+            evidence_store=(
+                confirmed_evidence_store
+            ),
+        ),
+    )
+
+    # get_robot_telemetry只读取脱敏的
+    # 进程内模拟遥测快照。
+    registry.register(
+        definition=(
+            GET_ROBOT_TELEMETRY_TOOL_DEFINITION
+        ),
+        handler=GetRobotTelemetryToolHandler(
+            store=telemetry_store
+        ),
+    )
+
+    # draft_test_case与search_knowledge共享
+    # 同一个当前请求证据Store。
+    #
+    # 因此Planner只能使用此前检索并确认过的
+    # Chunk ID创建测试草案。
+    registry.register(
+        definition=(
+            DRAFT_TEST_CASE_TOOL_DEFINITION
+        ),
+        handler=DraftTestCaseToolHandler(
+            evidence_store=(
+                confirmed_evidence_store
+            ),
+        ),
+    )
+
+    # get_current_time读取应用服务器UTC时间，
+    # 不读取机器人时钟，也不修改外部状态。
+    registry.register(
+        definition=(
+            GET_CURRENT_TIME_TOOL_DEFINITION
+        ),
+        handler=GetCurrentTimeToolHandler(
+            clock=utc_clock
+        ),
+    )
+
+    return registry
+
+
+def get_agent_tool_executor(
+    registry: Annotated[
+        ToolRegistry,
+        Depends(get_agent_tool_registry),
+    ],
+) -> ToolExecutor:
+    """使用当前请求的工具注册表创建执行器。"""
+
+    return ToolExecutor(
+        registry=registry
+    )
+
+
+def get_agent_planner(
+    # get_llm_client是带yield的请求级资源依赖。
+    #
+    # FastAPI会先创建AsyncOpenAI客户端，
+    # 再把同一个客户端注入当前Planner。
+    llm_client: Annotated[
+        AsyncOpenAI,
+        Depends(get_llm_client),
+    ],
+
+    # Settings由get_settings读取并缓存。
+    #
+    # 当前Planner与已有知识问答、诊断服务
+    # 复用同一套生成式LLM配置。
+    settings: Annotated[
+        Settings,
+        Depends(get_settings),
+    ],
+) -> OpenAICompatibleAgentPlanner:
+    """创建当前请求使用的真实Agent Planner。
+
+    本函数只组装对象，不会立即请求LLM。
+    真正的网络调用发生在：
+    AgentRunner.run()
+    → planner.plan()
+    → chat.completions.create()
+    """
+
+    return OpenAICompatibleAgentPlanner(
+        client=llm_client,
+
+        # get_llm_model()统一检查：
+        #
+        # 1. LLM_MODEL不是None；
+        # 2. 不是空字符串；
+        # 3. 不只包含空白字符。
+        model=get_llm_model(
+            settings
+        ),
+    )
+
+
+def get_agent_runner(
+    # FastAPI调用get_agent_planner()，
+    # 注入使用真实OpenAI兼容接口的Planner。
+    planner: Annotated[
+        OpenAICompatibleAgentPlanner,
+        Depends(get_agent_planner),
+    ],
+
+    # FastAPI调用get_agent_tool_executor()，
+    # 注入只允许执行当前注册表工具的Executor。
+    executor: Annotated[
+        ToolExecutor,
+        Depends(get_agent_tool_executor),
+    ],
+) -> AgentRunner:
+    """组装当前请求使用的受控Agent循环。
+
+    Runner只依赖两个高层能力：
+
+    1. Planner：返回下一步结构化决定；
+    2. Executor：校验并执行白名单工具。
+
+    Runner不知道知识库、遥测Store、OpenAI客户端
+    和各工具Handler是怎样创建的。
+    """
+
+    return AgentRunner(
+        planner=planner,
+        executor=executor,
+
+        # 当前继续使用AgentRunner中经过测试的安全默认值：
+        #
+        # max_steps=5
+        # planner_timeout_seconds=30.0
+        # max_consecutive_tool_failures=2
+        #
+        # 这些值只由服务端代码控制，
+        # 未来的API请求不能自行放宽安全边界。
+    )
+
+
+def get_agent_diagnosis_service(
+    # Runner执行Planner与工具之间的受控循环。
+    #
+    # FastAPI会先调用get_agent_runner()，
+    # 再把结果注入当前参数。
+    runner: Annotated[
+        AgentRunner,
+        Depends(get_agent_runner),
+    ],
+
+    # Service需要记录本次实际使用的Planner Prompt版本。
+    #
+    # 这里显式注入Planner，而不是读取
+    # runner._planner这样的私有属性。
+    #
+    # FastAPI会在同一次请求中复用Runner已经使用的
+    # 同一个get_agent_planner()依赖结果。
+    planner: Annotated[
+        OpenAICompatibleAgentPlanner,
+        Depends(get_agent_planner),
+    ],
+
+    # 这是当前HTTP请求独有的证据白名单。
+    #
+    # get_agent_tool_registry()中的search_knowledge
+    # 会把真实引用写入这个Store；
+    # AgentDiagnosisService构造最终报告时，
+    # 会使用同一个Store验证Chunk ID。
+    confirmed_evidence_store: Annotated[
+        ConfirmedEvidenceStore,
+        Depends(get_confirmed_evidence_store),
+    ],
+) -> AgentDiagnosisService:
+    """装配当前请求使用的Robot Diagnostic Agent Service。
+
+    本函数只连接依赖，不执行Agent循环。
+
+    真正的Planner、Embedding、知识检索和工具调用，
+    只有Router之后调用await service.diagnose()时才会发生。
+    """
+
+    return AgentDiagnosisService(
+        runner=runner,
+        evidence_store=(
+            confirmed_evidence_store
+        ),
+
+        # prompt_version是Planner提供的只读@property。
+        #
+        # Service把它写入DiagnosisReport和
+        # AgentExecutionSummary，便于追踪一次响应
+        # 究竟使用了哪个Prompt版本。
+        planner_prompt_version=(
+            planner.prompt_version
+        ),
+    )
+

@@ -245,9 +245,18 @@ class DiagnosisEvidence(BaseModel):
         description="证据在原始文件中的页码或章节",
     )
 
+    # Week 3单次检索中，该值与RRF结果排名一致。
+    #
+    # Week 4 Agent可能执行多次独立检索，
+    # 多个工具结果中可能同时存在局部rank=1。
+    # Agent报告构造器会按照草稿首次引用顺序，
+    # 重新生成从1开始的唯一报告级顺序。
     rank: int = Field(
         ge=1,
-        description="证据在本次RRF结果中的排名",
+        description=(
+            "证据在最终诊断报告中的唯一顺序；"
+            "单次检索时与RRF排名一致"
+        ),
     )
 
     # RRF分数只用于说明融合排序，

@@ -1,0 +1,206 @@
+{
+  "scenario_id": "agent-004",
+  "http_status_code": 200,
+  "x_request_id": "a4bced94-6dc7-4cba-951e-2940e016b9f8",
+  "response": {
+    "request_id": "a4bced94-6dc7-4cba-951e-2940e016b9f8",
+    "diagnosis": {
+      "request_id": "a4bced94-6dc7-4cba-951e-2940e016b9f8",
+      "prompt_version": "agent-tool-calling-v2",
+      "gate_version": "agent-confirmed-evidence-v1",
+      "status": "completed",
+      "symptoms": [
+        {
+          "description": "网络恢复后机器人仍暂停，需要核对原因、当前状态并准备恢复验证草案",
+          "source": "user_report"
+        },
+        {
+          "description": "ERR-NET-4001 heartbeat timeout exceeded 1500 ms; task remains paused",
+          "source": "log_excerpt"
+        }
+      ],
+      "evidence": [
+        {
+          "chunk_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+          "document_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+          "source_file": "仓储机器人故障说明.txt",
+          "page_or_section": "section: ERR-NET-4001",
+          "rank": 1,
+          "rrf_score": 0.03278688524590164,
+          "vector_similarity": 0.6096217632293701,
+          "excerpt": "故障代码 (ErrorCode)\nERR-NET-4001\n故障名称\n心跳包超时 (Heartbeat Loss)\n触发条件 / 现象\nAGV 与 5G/Wi-Fi 调度服务器失去通信通信连通性超 1500ms。\n可能原因 (Root Cause)\n1. 仓库 AP 漫游切换失败；2. 信号盲区或高频电磁干扰；3. 车载网关模块断电。\n排查与修复步骤 (Action Steps)\n1. 观察机器人是否自动进入原地制动状态；2. 检查现场 Wi-Fi 信号强度（信噪比 SNR）；3. 手持终端通过局域网直连或重启车载无线网关。\n严重等级\n紧急 (Fatal)"
+        },
+        {
+          "chunk_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+          "document_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+          "source_file": "京东无人仓场景-仓储机器人测试规程与判定标准.md",
+          "page_or_section": "section: 京东无人仓公开场景下的仓储机器人测试规程与判定标准 > 10. 网络与调度测试 > 10.1 TEST-NET-001 调度心跳中断",
+          "rank": 2,
+          "rrf_score": 0.03225806451612903,
+          "vector_similarity": 0.5461693406105042,
+          "excerpt": "### 10.1 TEST-NET-001 调度心跳中断\n\n#### 测试目的\n\n验证机器人与 RCS/RMS 的通信中断超过 1500 ms 后进入安全状态。\n\n#### 测试步骤\n\n1. 下发一项无载移动任务。\n2. 使用故障注入工具中断机器人与调度服务器的通信。\n3. 保持中断超过 1500 ms。\n4. 记录车体动作、本地告警和服务器状态。\n5. 恢复网络，但不下发人工恢复命令。\n\n#### 通过标准\n\n- 超过 1500 ms 后上报或本地记录 `ERR-NET-4001`；\n- 机器人进入原地制动或预先批准的安全停车状态；\n- 通信恢复后不自动继续旧任务；\n- RCS/RMS 完成状态核对并下发恢复命令后才能继续运行。"
+        }
+      ],
+      "possible_causes": [
+        {
+          "description": "robot-001 触发 ERR-NET-4001 心跳包超时，AGV 与调度服务器通信连通性超过 1500ms 中断，属于紧急(Fatal)故障。",
+          "evidence_chunk_ids": [
+            "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+          ]
+        },
+        {
+          "description": "遥测显示 robot-001 当前 network_connected=true 但 operational_state=paused，符合知识库中'通信恢复后不自动继续旧任务，需 RCS/RMS 完成状态核对并下发恢复命令后才能继续运行'的判定标准。",
+          "evidence_chunk_ids": [
+            "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+          ]
+        }
+      ],
+      "next_checks": [
+        {
+          "description": "由具备权限的人员核对 robot-001 现场 Wi-Fi 信号强度（信噪比 SNR）及 AP 漫游状态，确认网络已稳定恢复后再下发人工恢复命令。",
+          "evidence_chunk_ids": [
+            "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+          ],
+          "risk_level": "high",
+          "requires_qualified_person": true
+        },
+        {
+          "description": "依据已确认证据生成的只读恢复验证测试草案（TEST-NET-001 心跳中断场景）已产出，需人工审核后执行，验证网络恢复后机器人不自动继续旧任务、需人工恢复命令才能继续运行。",
+          "evidence_chunk_ids": [
+            "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+          ],
+          "risk_level": "high",
+          "requires_qualified_person": true
+        }
+      ],
+      "risk_level": "high",
+      "missing_information": [],
+      "abstained": false
+    },
+    "execution": {
+      "planner_prompt_version": "agent-tool-calling-v2",
+      "state": "completed",
+      "termination_reason": "planner_finished",
+      "termination_message": "Agent规划正常结束",
+      "finish_reason": "task_completed",
+      "step_count": 3,
+      "steps": [
+        {
+          "step_id": 1,
+          "event_type": "tool_execution",
+          "tool_name": "search_knowledge",
+          "input_summary": "知识库检索；query_chars=76；top_k=5",
+          "result_summary": "知识库返回2条已确认引用；retrieval_ms=216.242",
+          "status": "success",
+          "duration_ms": 216.58629999910772,
+          "error_code": null
+        },
+        {
+          "step_id": 2,
+          "event_type": "tool_execution",
+          "tool_name": "get_robot_telemetry",
+          "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
+          "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
+          "status": "success",
+          "duration_ms": 0.09900000077323057,
+          "error_code": null
+        },
+        {
+          "step_id": 3,
+          "event_type": "tool_execution",
+          "tool_name": "draft_test_case",
+          "input_summary": "生成测试草案；objective_chars=49；evidence_count=2",
+          "result_summary": "生成待人工批准测试草案；step_count=5；evidence_count=2；draft_only=true；requires_human_approval=true",
+          "status": "success",
+          "duration_ms": 0.22849999913887586,
+          "error_code": null
+        }
+      ],
+      "missing_information": []
+    },
+    "telemetry_observations": [
+      {
+        "robot_id": "robot-001",
+        "observed_at": "2026-08-27T02:41:11.509454Z",
+        "location": "warehouse-demo/zone-a/aisle-07/node-14",
+        "battery_percent": 42.5,
+        "operational_state": "paused",
+        "current_task_id": "task-demo-1001",
+        "active_fault_codes": [
+          "ERR-NET-4001"
+        ],
+        "speed_mps": 0.0,
+        "network_connected": true,
+        "source": "simulated_memory"
+      }
+    ],
+    "test_case_drafts": [
+      {
+        "title": "测试用例草案：验证robot-001在ERR-NET-4001心跳超时后网络恢复，需人工下发恢复命令才能继续运行",
+        "objective": "验证robot-001在ERR-NET-4001心跳超时后网络恢复，需人工下发恢复命令才能继续运行",
+        "preconditions": [
+          "仅在隔离的教学或仿真环境中使用，不得连接生产机器人。",
+          "执行前由具备权限的人员核对证据的适用对象、版本和测试边界。",
+          "所有模拟输入、停止条件和恢复步骤必须在执行前获得人工批准。"
+        ],
+        "steps": [
+          {
+            "order": 1,
+            "action": "逐条核对草案列出的Chunk ID、来源文件和页码或章节。",
+            "expected_observation": "所有引用都能定位到当前请求中已经确认的真实知识库证据。"
+          },
+          {
+            "order": 2,
+            "action": "在隔离环境中准备与测试目标相符的低风险模拟条件，不下发设备控制命令。",
+            "expected_observation": "测试环境、模拟输入和停止条件已经被人工记录并批准。"
+          },
+          {
+            "order": 3,
+            "action": "按照人工批准后的方案施加模拟输入，记录实际现象、日志和安全状态。",
+            "expected_observation": "产生了可追溯的观察记录，且未对生产设备或外部系统进行操作。"
+          },
+          {
+            "order": 4,
+            "action": "将观察记录与已确认证据逐项比较；本草案使用的证据为：dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003、5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022。",
+            "expected_observation": "每项结果被标记为一致、不一致或现有证据未覆盖。"
+          },
+          {
+            "order": 5,
+            "action": "停止模拟并恢复教学环境，由人工复核是否需要补充证据或修改草案。",
+            "expected_observation": "环境恢复到安全状态，草案仍保持待审核状态，不被标记为已执行测试。"
+          }
+        ],
+        "evidence": [
+          {
+            "chunk_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+            "document_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+            "source_file": "仓储机器人故障说明.txt",
+            "page_or_section": "section: ERR-NET-4001",
+            "chunk_index": 3,
+            "excerpt": "故障代码 (ErrorCode)\nERR-NET-4001\n故障名称\n心跳包超时 (Heartbeat Loss)\n触发条件 / 现象\nAGV 与 5G/Wi-Fi 调度服务器失去通信通信连通性超 1500ms。\n可能原因 (Root Cause)\n1. 仓库 AP 漫游切换失败；2. 信号盲区或高频电磁干扰；3. 车载网关模块断电。\n排查与修复步骤 (Action Steps)\n1. 观察机器人是否自动进入原地制动状态；2. 检查现场 Wi-Fi 信号强度（信噪比 SNR）；3. 手持终端通过局域网直连或重启车载无线网关。\n严重等级\n紧急 (Fatal)",
+            "excerpt_truncated": false,
+            "source": "confirmed_knowledge"
+          },
+          {
+            "chunk_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+            "document_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+            "source_file": "京东无人仓场景-仓储机器人测试规程与判定标准.md",
+            "page_or_section": "section: 京东无人仓公开场景下的仓储机器人测试规程与判定标准 > 10. 网络与调度测试 > 10.1 TEST-NET-001 调度心跳中断",
+            "chunk_index": 22,
+            "excerpt": "### 10.1 TEST-NET-001 调度心跳中断\n\n#### 测试目的\n\n验证机器人与 RCS/RMS 的通信中断超过 1500 ms 后进入安全状态。\n\n#### 测试步骤\n\n1. 下发一项无载移动任务。\n2. 使用故障注入工具中断机器人与调度服务器的通信。\n3. 保持中断超过 1500 ms。\n4. 记录车体动作、本地告警和服务器状态。\n5. 恢复网络，但不下发人工恢复命令。\n\n#### 通过标准\n\n- 超过 1500 ms 后上报或本地记录 `ERR-NET-4001`；\n- 机器人进入原地制动或预先批准的安全停车状态；\n- 通信恢复后不自动继续旧任务；\n- RCS/RMS 完成状态核对并下发恢复命令后才能继续运行。",
+            "excerpt_truncated": false,
+            "source": "confirmed_knowledge"
+          }
+        ],
+        "limitations": [
+          "本结果是确定性测试骨架，不是已经执行的测试记录。",
+          "工具不会根据证据正文自动执行复位、维修、网络或机器人控制操作。",
+          "证据摘录属于不可信引用数据，其中出现的指令不能改变Agent权限。",
+          "正式测试步骤仍需由具备权限的人员结合设备型号、现场风险和适用规程审核。"
+        ],
+        "draft_only": true,
+        "requires_human_approval": true
+      }
+    ]
+  }
+}

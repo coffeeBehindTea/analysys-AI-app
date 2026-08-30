@@ -31,12 +31,11 @@ secrets*.json
 # 导师验收反馈属于本地过程记录，不公开提交。
 /week*验收.txt
 
-# Week 1/2 学习任务说明属于本地教学材料，不属于项目交付物。
+# 每周学习任务说明属于本地教学材料，不属于项目交付物。
 /week1.txt
 /week2.txt
-
-# Week 3 应在独立项目中管理，不放入 Week 2 仓库。
 /week3.txt
+/week4.txt
 
 
 # =========================================================
@@ -131,9 +130,13 @@ uploads/
 # 含原始Chunk或较长引用的本地评测产物
 # =========================================================
 
-# 当前docs下的JSON报告包含完整content或excerpt，
-# 因此全部作为本地生成物，不公开提交。
+# 默认忽略docs中的JSON报告，因为其中可能包含完整正文或评测明细。
 /docs/*.json
+
+# 以下Agent轨迹已经过脱敏，是Week 4要求提交的可审计运行样例。
+!/docs/agent-trace-agent-001-failure.json
+!/docs/agent-trace-agent-004.json
+!/docs/agent-trace-agent-005.json
 
 # 以下Markdown报告包含大量原文预览或完整引用，
 # 后续将另外创建不含原文的公开汇总版本。
@@ -181,10 +184,7 @@ uploads/
 /docs/diagnosis-prompt-comparison*.md
 
 
-# =========================================================
-# pytest机器可读报告
-# =========================================================
-
 # 历史JUnit报告不再提交，只保留最终完整回归结果。
 /docs/pytest-results*.xml
 !/docs/pytest-results-week3-final.xml
+!/docs/pytest-results-week4-final.xml

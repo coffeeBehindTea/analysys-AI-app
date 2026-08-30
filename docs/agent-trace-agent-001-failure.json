@@ -1,0 +1,79 @@
+{
+  "scenario_id": "agent-001",
+  "http_status_code": 200,
+  "x_request_id": "3d9031b4-a3d1-4320-ba14-614d34b6bf5f",
+  "response": {
+    "request_id": "3d9031b4-a3d1-4320-ba14-614d34b6bf5f",
+    "diagnosis": {
+      "request_id": "3d9031b4-a3d1-4320-ba14-614d34b6bf5f",
+      "prompt_version": "agent-tool-calling-v2",
+      "gate_version": "agent-confirmed-evidence-v1",
+      "status": "abstained",
+      "symptoms": [
+        {
+          "description": "DataMan 260读码器线缆靠近大电流线路和高压电源，需要确认可能风险",
+          "source": "user_report"
+        },
+        {
+          "description": "DM260 cable routed near high-current wiring and high-voltage power sources",
+          "source": "log_excerpt"
+        }
+      ],
+      "evidence": [],
+      "possible_causes": [],
+      "next_checks": [],
+      "risk_level": "unknown",
+      "missing_information": [
+        "知识库中未找到关于DataMan 260线缆靠近大电流线路和高压电源布置风险的具体证据",
+        "现有证据仅涉及线缆接口、连接方式、弯曲半径和屏蔽要求，未明确说明与高压/大电流线路的间距或隔离要求"
+      ],
+      "abstained": true
+    },
+    "execution": {
+      "planner_prompt_version": "agent-tool-calling-v2",
+      "state": "completed",
+      "termination_reason": "planner_finished",
+      "termination_message": "Agent规划正常结束",
+      "finish_reason": "insufficient_information",
+      "step_count": 3,
+      "steps": [
+        {
+          "step_id": 1,
+          "event_type": "tool_execution",
+          "tool_name": "search_knowledge",
+          "input_summary": "知识库检索；query_chars=82；top_k=5",
+          "result_summary": "知识库返回3条已确认引用；retrieval_ms=210.651",
+          "status": "success",
+          "duration_ms": 211.01980000094045,
+          "error_code": null
+        },
+        {
+          "step_id": 2,
+          "event_type": "tool_execution",
+          "tool_name": "search_knowledge",
+          "input_summary": "知识库检索；query_chars=110；top_k=5",
+          "result_summary": "知识库返回2条已确认引用；retrieval_ms=123.154",
+          "status": "success",
+          "duration_ms": 123.35979999988922,
+          "error_code": null
+        },
+        {
+          "step_id": 3,
+          "event_type": "tool_execution",
+          "tool_name": "search_knowledge",
+          "input_summary": "知识库检索；query_chars=112；top_k=5",
+          "result_summary": "知识库返回1条已确认引用；retrieval_ms=176.127",
+          "status": "success",
+          "duration_ms": 176.227399999334,
+          "error_code": null
+        }
+      ],
+      "missing_information": [
+        "知识库中未找到关于DataMan 260线缆靠近大电流线路和高压电源布置风险的具体证据",
+        "现有证据仅涉及线缆接口、连接方式、弯曲半径和屏蔽要求，未明确说明与高压/大电流线路的间距或隔离要求"
+      ]
+    },
+    "telemetry_observations": [],
+    "test_case_drafts": []
+  }
+}

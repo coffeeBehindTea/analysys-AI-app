@@ -28,6 +28,9 @@ from pathlib import Path
 
 import pytest
 
+from app.agent.openai_planner import (
+    AGENT_PLANNER_PROMPT_VERSION,
+)
 from app.config import (
     Settings,
 )
@@ -167,7 +170,7 @@ async def test_run_real_evaluation_connects_complete_flow(
     )
     assert batch_kwargs[
         "planner_prompt_version"
-    ] == "agent-tool-calling-v2"
+    ] == AGENT_PLANNER_PROMPT_VERSION
     assert batch_kwargs["embedding_model"] == (
         TEST_EMBEDDING_MODEL
     )

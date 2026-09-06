@@ -1,7 +1,7 @@
-"""FastAPI 依赖装配函数。
+"""FastAPI依赖装配函数。
 
-这里决定 Settings、AsyncOpenAI 和 TriageService 如何创建与连接，
-但不实现具体业务。
+这里集中决定配置、SDK客户端、Provider、Service和Agent组件
+如何创建、连接与释放，但不实现具体业务。
 """
 
 # AsyncIterator[T] 表示可以通过 async for 消费、逐步产生 T 的异步迭代器。
@@ -48,6 +48,17 @@ from app.services.embedding_client import (
     create_embedding_client,
     get_embedding_model,
 )
+from app.services.vision_client import (
+    create_vision_client,
+    get_vision_model,
+)
+from app.services.vision_input import (
+    VisionInputAdapter,
+)
+from app.services.vision_provider import (
+    OpenAICompatibleVisionProvider,
+    VisionProvider,
+)
 
 from app.agent.demo_telemetry import (
     build_demo_robot_telemetry_store,
@@ -57,6 +68,9 @@ from app.agent.evidence_store import (
 )
 from app.agent.executor import (
     ToolExecutor,
+)
+from app.agent.vision_input_store import (
+    RequestVisionInputStore,
 )
 # OpenAICompatibleAgentPlanner把OpenAI兼容SDK响应
 # 转换成Runner认识的AgentPlannerDecision。
@@ -72,10 +86,12 @@ from app.agent.registry import (
     ToolRegistry,
 )
 from app.agent.tools import (
+    ANALYZE_ROBOT_IMAGE_TOOL_DEFINITION,
     DRAFT_TEST_CASE_TOOL_DEFINITION,
     GET_CURRENT_TIME_TOOL_DEFINITION,
     GET_ROBOT_TELEMETRY_TOOL_DEFINITION,
     SEARCH_KNOWLEDGE_TOOL_DEFINITION,
+    AnalyzeRobotImageToolHandler,
     DraftTestCaseToolHandler,
     GetCurrentTimeToolHandler,
     GetRobotTelemetryToolHandler,
@@ -182,6 +198,87 @@ async def get_embedding_client(
         # 无论上传成功、校验失败还是上游异常，
         # 都关闭 AsyncOpenAI 持有的 HTTP 连接池。
         await client.close()
+
+
+async def get_vision_client(
+    settings: Annotated[
+        Settings,
+        Depends(get_settings),
+    ],
+) -> AsyncIterator[AsyncOpenAI]:
+    """为一次请求创建并最终关闭Vision异步客户端。
+
+    FastAPI会执行到yield，把客户端注入下游依赖；
+    请求结束后继续执行finally并关闭HTTP连接资源。
+    """
+
+    # 工厂函数负责校验独立的Vision API Key、
+    # 处理可选Base URL，并传入SDK层超时。
+    #
+    # 创建客户端本身不会发送图片或访问网络。
+    client = create_vision_client(
+        settings
+    )
+
+    try:
+        # yield把当前客户端提供给
+        # get_vision_provider()。
+        yield client
+    finally:
+        # 无论下游成功、拒答还是抛出异常，
+        # 都关闭AsyncOpenAI持有的异步HTTP连接池。
+        await client.close()
+
+
+def get_vision_input_adapter(
+    settings: Annotated[
+        Settings,
+        Depends(get_settings),
+    ],
+) -> VisionInputAdapter:
+    """使用当前图片资源限制创建Vision输入适配器。"""
+
+    # Adapter不读取.env，也不知道Settings的存在。
+    # 依赖层把配置值转换成它明确需要的构造参数。
+    return VisionInputAdapter(
+        max_image_size_bytes=(
+            settings.max_vision_image_size_bytes
+        ),
+        max_image_dimension_px=(
+            settings.max_vision_image_dimension_px
+        ),
+        max_image_pixels=(
+            settings.max_vision_image_pixels
+        ),
+    )
+
+
+def get_vision_provider(
+    client: Annotated[
+        AsyncOpenAI,
+        Depends(get_vision_client),
+    ],
+    settings: Annotated[
+        Settings,
+        Depends(get_settings),
+    ],
+) -> OpenAICompatibleVisionProvider:
+    """组装真实OpenAI兼容Vision Provider。"""
+
+    # get_vision_model()在Provider创建前
+    # 检查VISION_MODEL是否存在且不是空字符串。
+    #
+    # Provider只接收已经可用的客户端、模型和超时，
+    # 不直接读取环境变量，也不管理客户端生命周期。
+    return OpenAICompatibleVisionProvider(
+        client=client,
+        model=get_vision_model(
+            settings
+        ),
+        timeout_seconds=(
+            settings.vision_timeout_seconds
+        ),
+    )
 
 
 def get_vector_store(
@@ -628,6 +725,22 @@ def get_confirmed_evidence_store(
     return ConfirmedEvidenceStore()
 
 
+def get_request_vision_input_store(
+) -> RequestVisionInputStore:
+    """为一次Agent请求创建独立的空图片输入Store。
+
+    本依赖不能使用lru_cache。FastAPI会在同一次请求内
+    复用这个对象，但下一次HTTP请求必须取得新的空Store，
+    防止不同请求通过相同image_ref读取到彼此的图片。
+
+    当前任务3只完成工具注册，因此Store初始为空。
+    任务4的多模态API会在Agent运行前把已经通过
+    VisionInputAdapter检查的图片登记到同一个Store中。
+    """
+
+    return RequestVisionInputStore()
+
+
 def get_agent_tool_registry(
     # Agent搜索工具只依赖门控混合检索器，
     # 不再依赖完整的HybridKnowledgeQueryService。
@@ -655,6 +768,20 @@ def get_agent_tool_registry(
     utc_clock: Annotated[
         SystemUtcClock,
         Depends(get_system_utc_clock),
+    ],
+
+    # Vision Provider负责真正的异步结构化图片观察。
+    # Handler依赖VisionProvider协议，不绑定具体供应商SDK。
+    vision_provider: Annotated[
+        VisionProvider,
+        Depends(get_vision_provider),
+    ],
+
+    # 当前请求图片Store只保存已经验证的VisionInput。
+    # 任务4的请求处理层和当前视觉工具必须共享此实例。
+    vision_input_store: Annotated[
+        RequestVisionInputStore,
+        Depends(get_request_vision_input_store),
     ],
 ) -> ToolRegistry:
     """注册当前Agent允许调用的只读工具。
@@ -723,6 +850,21 @@ def get_agent_tool_registry(
         ),
         handler=GetCurrentTimeToolHandler(
             clock=utc_clock
+        ),
+    )
+
+    # analyze_robot_image只能读取当前请求Store中
+    # 已经登记的图片，并通过Vision Provider生成观察。
+    #
+    # 当前Store没有对应image_ref时，Handler返回None，
+    # ToolExecutor会将其转换成empty_result。
+    registry.register(
+        definition=(
+            ANALYZE_ROBOT_IMAGE_TOOL_DEFINITION
+        ),
+        handler=AnalyzeRobotImageToolHandler(
+            provider=vision_provider,
+            input_store=vision_input_store,
         ),
     )
 
@@ -857,6 +999,22 @@ def get_agent_diagnosis_service(
         ConfirmedEvidenceStore,
         Depends(get_confirmed_evidence_store),
     ],
+
+    # Service在Runner启动前使用Adapter验证外部图片。
+    # Adapter只做本地解码、格式和资源上限检查，
+    # 不调用Vision模型。
+    vision_input_adapter: Annotated[
+        VisionInputAdapter,
+        Depends(get_vision_input_adapter),
+    ],
+
+    # 这个Store与get_agent_tool_registry()注入给
+    # analyze_robot_image Handler的Store是同一实例。
+    # FastAPI会在单次请求中缓存同一个依赖结果。
+    vision_input_store: Annotated[
+        RequestVisionInputStore,
+        Depends(get_request_vision_input_store),
+    ],
 ) -> AgentDiagnosisService:
     """装配当前请求使用的Robot Diagnostic Agent Service。
 
@@ -871,6 +1029,12 @@ def get_agent_diagnosis_service(
         evidence_store=(
             confirmed_evidence_store
         ),
+        vision_input_adapter=(
+            vision_input_adapter
+        ),
+        vision_input_store=(
+            vision_input_store
+        ),
 
         # prompt_version是Planner提供的只读@property。
         #
@@ -881,4 +1045,3 @@ def get_agent_diagnosis_service(
             planner.prompt_version
         ),
     )
-

@@ -27,6 +27,8 @@ from app.schemas.agent_api import (
     AgentDiagnosisResponse,
     AgentExecutionSummary,
     AgentToolTraceEvent,
+    AgentVisionObservation,
+    MAX_AGENT_DIAGNOSIS_IMAGES,
 )
 from app.schemas.agent_tools import (
     DraftTestCaseEvidence,
@@ -39,6 +41,10 @@ from app.schemas.diagnostics import (
     DiagnosisEvidence,
     DiagnosisReport,
     DiagnosisSymptom,
+)
+from app.schemas.vision import (
+    VisionObservation,
+    VisionObservationItem,
 )
 
 
@@ -59,6 +65,11 @@ TEST_DOCUMENT_ID = "a" * 64
 TEST_CHUNK_ID = (
     f"{TEST_DOCUMENT_ID}:000001"
 )
+
+
+# 固定图片摘要用于测试视觉观察与图片引用的关系。
+# 它只是满足SHA-256格式的脱敏测试值，不对应真实图片。
+TEST_IMAGE_SHA256 = "b" * 64
 
 
 def make_success_trace(
@@ -283,6 +294,51 @@ def make_test_case_draft(
     )
 
 
+def make_vision_observation(
+) -> VisionObservation:
+    """创建一项明确标记为Vision模型来源的测试观察。"""
+
+    return VisionObservation(
+        status="completed",
+        image_quality="clear",
+        observations=(
+            VisionObservationItem(
+                description="NET指示灯红色常亮",
+                category="visible_condition",
+                confidence="high",
+                region="设备面板右上区域",
+            ),
+        ),
+        visible_indicators=(),
+        uncertain_items=(),
+        untrusted_text_detected=False,
+        untrusted_text_notes=(),
+        requires_human_check=False,
+        human_check_reasons=(),
+        source_image_sha256=(
+            TEST_IMAGE_SHA256
+        ),
+        prompt_version=(
+            "robot-vision-observation-v1"
+        ),
+        model_name="fake-vision-provider",
+    )
+
+
+def make_agent_vision_observation(
+    *,
+    step_id: int = 1,
+    image_ref: str = "image_001",
+) -> AgentVisionObservation:
+    """把测试视觉输出关联到指定Agent步骤和图片引用。"""
+
+    return AgentVisionObservation(
+        step_id=step_id,
+        image_ref=image_ref,
+        observation=make_vision_observation(),
+    )
+
+
 def test_request_strips_fields_and_accepts_optional_goal(
 ) -> None:
     """请求契约应清理空白并保留合法可选任务目标。"""
@@ -307,6 +363,7 @@ def test_request_strips_fields_and_accepts_optional_goal(
         ),
         "log_excerpt": "ERR-NET-4001",
         "task_goal": "核对恢复条件",
+        "images": [],
     }
 
 
@@ -321,6 +378,77 @@ def test_request_allows_missing_task_goal(
     )
 
     assert request.task_goal is None
+    assert request.images == []
+
+
+def test_request_accepts_images_without_dumping_base64(
+) -> None:
+    """多模态请求应保留图片对象但默认序列化必须隐藏Base64。"""
+
+    request = AgentDiagnosisRequest(
+        robot_id="robot-001",
+        symptom="设备面板指示灯状态异常",
+        log_excerpt="NET indicator warning",
+        images=[{
+            "mime_type": "image/png",
+            "encoding": "base64",
+            "image_base64": "aGVsbG8=",
+            "analysis_goal": (
+                "检查设备面板上可见的指示灯状态"
+            ),
+            "detail": "auto",
+        }],
+    )
+
+    assert len(request.images) == 1
+    assert (
+        request.images[0]
+        .image_base64
+        .get_secret_value()
+        == "aGVsbG8="
+    )
+
+    dumped_image = (
+        request.model_dump()["images"][0]
+    )
+
+    assert "image_base64" not in dumped_image
+    assert dumped_image["mime_type"] == (
+        "image/png"
+    )
+    assert dumped_image["analysis_goal"] == (
+        "检查设备面板上可见的指示灯状态"
+    )
+
+
+def test_request_rejects_too_many_images(
+) -> None:
+    """请求图片数超过服务上限时应在进入Service前失败。"""
+
+    image_payload = {
+        "mime_type": "image/png",
+        "encoding": "base64",
+        "image_base64": "aGVsbG8=",
+        "analysis_goal": "检查指示灯",
+        "detail": "auto",
+    }
+
+    with pytest.raises(
+        ValidationError,
+        match="images",
+    ):
+        AgentDiagnosisRequest(
+            robot_id="robot-001",
+            symptom="设备面板状态异常",
+            log_excerpt="panel warning",
+            images=[
+                image_payload
+                for _ in range(
+                    MAX_AGENT_DIAGNOSIS_IMAGES
+                    + 1
+                )
+            ],
+        )
 
 
 def test_request_rejects_client_controlled_agent_boundaries(
@@ -375,7 +503,7 @@ def test_success_trace_has_no_error_code(
 
 def test_timeout_trace_accepts_matching_error_code(
 ) -> None:
-    """timeout状态只能使用tool_timeout错误码。"""
+    """通用工具超时应接受tool_timeout错误码。"""
 
     trace = AgentToolTraceEvent(
         step_id=1,
@@ -391,6 +519,51 @@ def test_timeout_trace_accepts_matching_error_code(
     assert trace.error_code == (
         "tool_timeout"
     )
+
+
+@pytest.mark.parametrize(
+    (
+        "status",
+        "error_code",
+    ),
+    [
+        (
+            "timeout",
+            "vision_timeout",
+        ),
+        (
+            "error",
+            "vision_upstream_error",
+        ),
+        (
+            "error",
+            "invalid_vision_response",
+        ),
+    ],
+)
+def test_trace_accepts_specific_vision_error_code(
+    status: str,
+    error_code: str,
+) -> None:
+    """公开轨迹应保留Vision最终失败的稳定分类。"""
+
+    trace = AgentToolTraceEvent.model_validate({
+        "step_id": 1,
+        "tool_name": "analyze_robot_image",
+        "input_summary": (
+            "图片分析；image_ref=image_primary"
+        ),
+        "result_summary": (
+            f"status={status}；"
+            f"error_code={error_code}"
+        ),
+        "status": status,
+        "duration_ms": 1.0,
+        "error_code": error_code,
+    })
+
+    assert trace.status == status
+    assert trace.error_code == error_code
 
 
 @pytest.mark.parametrize(
@@ -600,12 +773,95 @@ def test_valid_agent_response_combines_all_public_outputs(
     assert response.execution.state == (
         "completed"
     )
+    assert response.vision_observations == []
     assert response.telemetry_observations[
         0
     ].source == "simulated_memory"
     assert response.test_case_drafts[
         0
     ].draft_only is True
+
+
+def test_response_accepts_visual_observation_for_successful_step(
+) -> None:
+    """视觉观察必须绑定到一次真实成功的视觉工具轨迹。"""
+
+    vision_step = make_success_trace(
+        step_id=1,
+        tool_name="analyze_robot_image",
+    )
+
+    response = AgentDiagnosisResponse(
+        request_id=TEST_REQUEST_ID,
+        diagnosis=make_diagnosis_report(),
+        execution=make_completed_execution(
+            steps=[vision_step]
+        ),
+        vision_observations=[
+            make_agent_vision_observation()
+        ],
+    )
+
+    public_observation = (
+        response.vision_observations[0]
+    )
+
+    assert public_observation.image_ref == (
+        "image_001"
+    )
+    assert public_observation.observation.source == (
+        "vision_model"
+    )
+    assert (
+        public_observation
+        .observation
+        .source_image_sha256
+        == TEST_IMAGE_SHA256
+    )
+
+
+def test_response_rejects_visual_observation_without_tool_step(
+) -> None:
+    """响应不能凭空加入没有执行轨迹支持的视觉观察。"""
+
+    with pytest.raises(
+        ValidationError,
+        match="一一对应",
+    ):
+        AgentDiagnosisResponse(
+            request_id=TEST_REQUEST_ID,
+            diagnosis=make_diagnosis_report(),
+            execution=make_completed_execution(
+                steps=[]
+            ),
+            vision_observations=[
+                make_agent_vision_observation()
+            ],
+        )
+
+
+def test_response_rejects_missing_visual_observation_for_tool_step(
+) -> None:
+    """成功视觉步骤的结构化观察不能从公开响应中消失。"""
+
+    with pytest.raises(
+        ValidationError,
+        match="一一对应",
+    ):
+        AgentDiagnosisResponse(
+            request_id=TEST_REQUEST_ID,
+            diagnosis=make_diagnosis_report(),
+            execution=make_completed_execution(
+                steps=[
+                    make_success_trace(
+                        tool_name=(
+                            "analyze_robot_image"
+                        )
+                    )
+                ]
+            ),
+            vision_observations=[],
+        )
 
 
 def test_response_requires_matching_request_ids(

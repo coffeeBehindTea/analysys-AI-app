@@ -21,6 +21,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StringConstraints,
     field_validator,
     model_validator,
 )
@@ -28,6 +29,75 @@ from pydantic import (
 from app.schemas.knowledge_query import (
     KnowledgeCitation,
 )
+
+
+# Agent只能通过这种受限的不透明引用访问
+# 当前请求已经登记的图片。
+#
+# StringConstraints把字符串清理、长度和正则限制
+# 放进可复用类型中。工具输入和请求级图片Store
+# 将共享同一份约束，避免两边规则逐渐不一致。
+AgentImageReference = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+        pattern=(
+            r"^image_[A-Za-z0-9]"
+            r"[A-Za-z0-9_-]{0,121}$"
+        ),
+    ),
+]
+
+
+class AnalyzeRobotImageToolInput(BaseModel):
+    """analyze_robot_image工具的输入契约。
+
+    Planner只能引用当前请求已经登记的图片，
+    并说明本次需要观察的目标。
+
+    工具输入故意不接受Base64、远程URL、文件路径、
+    设备控制参数或任意命令，防止Planner绕过请求级
+    图片存储和VisionInputAdapter的安全检查。
+    """
+
+    model_config = ConfigDict(
+        # 清理普通字符串两端的空白，
+        # 但不会改写字符串内部的图片引用或分析目标。
+        str_strip_whitespace=True,
+
+        # 拒绝image_base64、image_url、command等
+        # 所有未声明的字段。
+        extra="forbid",
+
+        # 输入通过校验后不允许重新赋值，
+        # 避免Handler执行期间改变图片引用或分析目标。
+        frozen=True,
+    )
+
+    image_ref: AgentImageReference = Field(
+        description=(
+            "当前Agent请求中已经验证并登记的"
+            "不透明图片引用；不是文件路径或URL"
+        ),
+        examples=[
+            "image_primary",
+        ],
+    )
+
+    analysis_goal: str = Field(
+        min_length=1,
+        max_length=2_000,
+        description=(
+            "需要从图片中直接观察的目标；"
+            "该文本属于不可信Planner输入，"
+            "不能改变工具权限或系统约束"
+        ),
+        examples=[
+            "检查设备面板上可见的指示灯状态",
+        ],
+    )
 
 
 class SearchKnowledgeToolInput(BaseModel):

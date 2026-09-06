@@ -11,7 +11,8 @@
 7. 处理Planner主动结束；
 8. 限制最大工具调用步数；
 9. 拒绝重复工具调用；
-10. 拒绝不符合契约的Planner响应。
+10. 根据已完成进度收窄后续可见工具；
+11. 拒绝不符合契约的Planner响应。
 
 工具失败会经过独立策略模块分类；
 连续可恢复失败达到限制或出现权限失败时，
@@ -121,6 +122,78 @@ def _canonical_tool_call_signature(
     return (
         tool_call.tool_name,
         canonical_arguments,
+    )
+
+
+def _narrow_tool_schemas_after_progress(
+    *,
+    active_tool_schemas: tuple[
+        OpenAIToolSchema,
+        ...,
+    ],
+    interactions: tuple[
+        AgentToolInteraction,
+        ...,
+    ],
+) -> tuple[
+    OpenAIToolSchema,
+    ...,
+]:
+    """根据成功工具历史收窄下一轮Planner可见工具。
+
+    请求级工具范围回答“本次任务最多允许哪些能力”；本函数
+    回答“根据已经完成的步骤，下一轮还需要哪些能力”。它只会
+    从active_tool_schemas中删除工具，绝不会增加新工具。
+
+    当前进度策略只有一条：draft_test_case已经成功时，
+    隐藏该工具以及知识检索工具，避免生成多份内容不同但
+    目的相同的草案，或在草案完成后重新检索并改写草案。
+
+    在草案成功之前不会因为成功检索次数达到固定数字而隐藏
+    search_knowledge。不同诊断任务需要的证据数量并不相同，
+    Runner不应使用统一次数替代Planner对证据充分性的判断。
+
+    本函数不读取用户任务正文、场景编号、Gold答案、文件名、
+    页码或Chunk正文，因此不会把评测案例规则写进生产流程。
+    """
+
+    active_tool_names = frozenset(
+        schema["function"]["name"]
+        for schema in active_tool_schemas
+    )
+
+    # 不需要草案的诊断任务保持原有多轮检索能力。
+    # 这样不会误伤需要从多个子问题收集证据的普通诊断。
+    if "draft_test_case" not in active_tool_names:
+        return active_tool_schemas
+
+    draft_already_completed = any(
+        interaction.tool_call.tool_name
+        == "draft_test_case"
+        and interaction.result.status
+        == "success"
+        for interaction in interactions
+    )
+
+    hidden_tool_names: set[str] = set()
+
+    if draft_already_completed:
+        # 草案已经形成后，不再重新检索并改写草案。
+        # Planner仍可使用尚未完成的遥测、视觉或时间工具，
+        # 也可以直接返回finish。
+        hidden_tool_names.update({
+            "search_knowledge",
+            "draft_test_case",
+        })
+
+    if not hidden_tool_names:
+        return active_tool_schemas
+
+    return tuple(
+        schema
+        for schema in active_tool_schemas
+        if schema["function"]["name"]
+        not in hidden_tool_names
     )
 
 
@@ -324,17 +397,98 @@ class AgentRunner:
             .build_openai_tool_schemas()
         )
 
+        # 注册表Schema是Executor真实执行白名单的快照。
+        # 保存名称集合后，每个请求只能在这个全集内继续收窄，
+        # 不能凭空扩展一个未注册工具。
+        self._registered_tool_names = frozenset(
+            schema["function"]["name"]
+            for schema in self._tool_schemas
+        )
+
+    @property
+    def registered_tool_names(
+        self,
+    ) -> frozenset[str]:
+        """返回本Runner对应Executor的不可变工具名快照。
+
+        AgentDiagnosisService用这个只读属性把请求的结构性工具
+        范围与实际注册表求交集。这样测试或其他部署只注册部分
+        工具时，Service不会把不存在的工具名交给Runner；同时
+        返回frozenset可防止调用方修改Runner内部权限快照。
+        """
+
+        return self._registered_tool_names
+
     async def run(
         self,
         task: str,
         /,
+        *,
+        allowed_tool_names: (
+            frozenset[str] | None
+        ) = None,
     ) -> AgentRunResult:
-        """运行规划、工具调用和观察循环。"""
+        """在当前请求工具范围内运行规划和观察循环。"""
 
         if not isinstance(task, str):
             raise TypeError(
                 "task必须是字符串"
             )
+
+        # None表示使用Executor注册表中的全部只读工具，
+        # 从而保持旧的内部调用语义。
+        # API Service会明确传入frozenset以启用请求级最小权限。
+        if allowed_tool_names is None:
+            active_tool_names = (
+                self._registered_tool_names
+            )
+        else:
+            if not isinstance(
+                allowed_tool_names,
+                frozenset,
+            ):
+                raise TypeError(
+                    "allowed_tool_names必须是"
+                    "frozenset或None"
+                )
+
+            if not all(
+                isinstance(name, str)
+                and bool(name.strip())
+                for name in allowed_tool_names
+            ):
+                raise ValueError(
+                    "allowed_tool_names只能包含"
+                    "非空工具名"
+                )
+
+            unknown_tool_names = (
+                allowed_tool_names
+                - self._registered_tool_names
+            )
+
+            if unknown_tool_names:
+                raise ValueError(
+                    "allowed_tool_names包含"
+                    "未注册工具"
+                )
+
+            active_tool_names = (
+                allowed_tool_names
+            )
+
+        # 保留注册表原有Schema顺序，只删除本次请求不需要的工具。
+        # 这是请求开始时的最大允许范围；循环内还会根据已完成
+        # 的工具进度继续收窄，但不会重新扩大。
+        #
+        # 空tuple是合法值：Planner仍可直接finish或安全拒答，
+        # 但不能请求任何工具。
+        active_tool_schemas = tuple(
+            schema
+            for schema in self._tool_schemas
+            if schema["function"]["name"]
+            in active_tool_names
+        )
 
         # 第一次构造Context同时完成：
         #
@@ -370,6 +524,47 @@ class AgentRunner:
         consecutive_tool_failures = 0
 
         while True:
+            # 请求级范围是静态权限上限；round_tool_schemas是
+            # 本轮基于成功历史得到的最小剩余能力集合。
+            #
+            # 例如测试草案已经成功生成后，本轮不再暴露
+            # search_knowledge和draft_test_case，避免重新检索后
+            # 生成另一份相互冲突的草案。单纯的检索次数不会触发
+            # 这个收窄过程。
+            round_tool_schemas = (
+                _narrow_tool_schemas_after_progress(
+                    active_tool_schemas=(
+                        active_tool_schemas
+                    ),
+                    interactions=tuple(
+                        interactions
+                    ),
+                )
+            )
+            round_tool_names = frozenset(
+                schema["function"]["name"]
+                for schema in round_tool_schemas
+            )
+
+            # 保持旧的内部调用语义：调用方没有显式传入请求级
+            # 范围，且本轮也没有发生动态收窄时，Executor继续
+            # 接收None。这样注册表外名称仍被分类为unknown_tool，
+            # Planner可以观察该可恢复失败后安全结束。
+            #
+            # 只要公开请求给出了范围，或本轮已经隐藏了完成的
+            # 工具，就必须传入实际round_tool_names，确保执行期
+            # 边界与Planner本轮看到的Schema完全一致。
+            if (
+                allowed_tool_names is None
+                and round_tool_names
+                == self._registered_tool_names
+            ):
+                executor_tool_names = None
+            else:
+                executor_tool_names = (
+                    round_tool_names
+                )
+
             # next_step根据已经实际完成的工具交互计算，
             # 不使用Planner返回的自然语言编号。
             context = AgentPlanningContext(
@@ -409,7 +604,7 @@ class AgentRunner:
                             # 防止Provider修改下一轮的
                             # 工具描述。
                             tool_schemas=deepcopy(
-                                self._tool_schemas
+                                round_tool_schemas
                             ),
                         )
                     )
@@ -692,7 +887,15 @@ class AgentRunner:
 
             result = await (
                 self._executor.execute(
-                    executable_call
+                    executable_call,
+
+                    # 与Planner看到的工具范围使用同一个
+                    # 本轮不可变集合，形成真正的执行期边界。
+                    # 即使Provider返回了本轮已经隐藏的工具名，
+                    # Executor也不会执行它。
+                    allowed_tool_names=(
+                        executor_tool_names
+                    ),
                 )
             )
 

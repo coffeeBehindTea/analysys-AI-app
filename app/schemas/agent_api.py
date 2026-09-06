@@ -38,12 +38,30 @@ from app.schemas.agent_runtime import (
     AgentRunTerminationReason,
 )
 from app.schemas.agent_tools import (
+    AgentImageReference,
     DraftTestCaseToolOutput,
     RobotTelemetryToolOutput,
 )
 from app.schemas.diagnostics import (
     DiagnosisReport,
 )
+from app.schemas.vision import (
+    VisionImagePayload,
+    VisionObservation,
+)
+
+
+# 一次Agent诊断请求最多接受3张图片。
+#
+# 这个限制同时控制：
+#
+# 1. HTTP请求体大小；
+# 2. 单次Agent可选择的视觉工具范围；
+# 3. Vision调用次数、延迟和费用的上界。
+#
+# 它不是VisionInputAdapter的单张图片大小限制。
+# 单张图片仍然必须经过适配器的字节、尺寸和格式校验。
+MAX_AGENT_DIAGNOSIS_IMAGES = 3
 
 
 # 公开轨迹中的摘要字段必须足够短。
@@ -141,6 +159,26 @@ class AgentDiagnosisRequest(BaseModel):
         examples=[
             "核对故障原因、当前遥测和安全恢复条件"
         ],
+    )
+
+    # 保留空列表默认值，使原有纯文本Agent请求继续兼容。
+    #
+    # 客户端只提交图片载荷，不提交image_ref。
+    # Service会在适配成功后按请求内顺序生成
+    # image_001、image_002等不透明引用，防止客户端
+    # 伪造引用去读取其他请求中的图片。
+    images: list[
+        VisionImagePayload
+    ] = Field(
+        default_factory=list,
+        max_length=(
+            MAX_AGENT_DIAGNOSIS_IMAGES
+        ),
+        description=(
+            "本次诊断附带的图片；"
+            "每张图片必须是Base64载荷，"
+            "完整图片不会进入公开响应或执行轨迹"
+        ),
     )
 
 
@@ -265,11 +303,14 @@ class AgentToolTraceEvent(BaseModel):
 
             "timeout": {
                 "tool_timeout",
+                "vision_timeout",
             },
 
             "error": {
                 "tool_execution_error",
                 "invalid_tool_output",
+                "vision_upstream_error",
+                "invalid_vision_response",
             },
         }
 
@@ -488,13 +529,51 @@ class AgentExecutionSummary(BaseModel):
         return self
 
 
+class AgentVisionObservation(BaseModel):
+    """一次视觉工具调用产生的公开观察。
+
+    image_ref只在当前请求内有效，用于把响应中的观察
+    与Planner实际选择的图片关联起来。
+
+    observation保留source="vision_model"、图片SHA-256、
+    Prompt版本和模型名，但不包含原始图片字节。
+    """
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="forbid",
+        frozen=True,
+    )
+
+    step_id: int = Field(
+        ge=1,
+        le=20,
+        description=(
+            "产生这项视觉观察的Agent工具步骤编号"
+        ),
+    )
+
+    image_ref: AgentImageReference = Field(
+        description=(
+            "当前请求内由服务端分配的不透明图片引用"
+        ),
+    )
+
+    observation: VisionObservation = Field(
+        description=(
+            "Vision Provider返回的结构化可见观察；"
+            "它不是知识库确认的工程事实"
+        ),
+    )
+
+
 class AgentDiagnosisResponse(BaseModel):
     """POST /api/v1/agent/diagnose的成功响应。
 
     diagnosis沿用第三周DiagnosisReport，
     execution提供Week 4 Agent执行审计信息。
 
-    模拟遥测和测试草案使用各自已经存在的
+    视觉观察、模拟遥测和测试草案使用各自明确的
     Pydantic输出契约，不能返回任意工具字典。
     """
 
@@ -522,6 +601,17 @@ class AgentDiagnosisResponse(BaseModel):
     execution: AgentExecutionSummary = Field(
         description=(
             "Agent循环的公开终止信息和脱敏轨迹"
+        ),
+    )
+
+    vision_observations: list[
+        AgentVisionObservation
+    ] = Field(
+        default_factory=list,
+        max_length=20,
+        description=(
+            "Agent实际取得的结构化视觉观察；"
+            "没有成功调用视觉工具时为空"
         ),
     )
 
@@ -587,6 +677,42 @@ class AgentDiagnosisResponse(BaseModel):
             raise ValueError(
                 "响应request_id必须与"
                 "diagnosis.request_id一致"
+            )
+
+        # 视觉观察必须与公开执行轨迹中的一次成功
+        # analyze_robot_image调用一一对应。
+        #
+        # 这样，响应不能凭空添加模型观察，
+        # 也不能隐藏一次已经成功执行的视觉分析。
+        successful_vision_step_ids = {
+            step.step_id
+            for step in self.execution.steps
+            if (
+                step.tool_name
+                == "analyze_robot_image"
+                and step.status == "success"
+            )
+        }
+
+        returned_vision_step_ids = [
+            item.step_id
+            for item in self.vision_observations
+        ]
+
+        if len(returned_vision_step_ids) != len(
+            set(returned_vision_step_ids)
+        ):
+            raise ValueError(
+                "vision_observations不能包含"
+                "重复step_id"
+            )
+
+        if set(returned_vision_step_ids) != (
+            successful_vision_step_ids
+        ):
+            raise ValueError(
+                "vision_observations必须与成功的"
+                "analyze_robot_image步骤一一对应"
             )
 
         # 测试草案中的引用必须同时出现在

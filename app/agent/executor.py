@@ -29,6 +29,11 @@ from pydantic import (
     ValidationError,
 )
 
+from app.errors import (
+    InvalidVisionResponseError,
+    VisionTimeoutError,
+    VisionUpstreamError,
+)
 from app.agent.registry import (
     ToolRegistry,
 )
@@ -110,8 +115,12 @@ class ToolExecutor:
     async def execute(
         self,
         tool_call: ToolCall,
+        *,
+        allowed_tool_names: (
+            frozenset[str] | None
+        ) = None,
     ) -> ToolExecutionResult:
-        """安全处理一次结构化工具调用。"""
+        """在注册表和请求级边界内执行一次工具调用。"""
 
         # ToolCall必须已经完成通用结构校验。
         #
@@ -125,7 +134,60 @@ class ToolExecutor:
                 "tool_call必须是ToolCall"
             )
 
+        # None表示调用方没有进一步缩小注册表，
+        # 用于兼容不需要请求级隔离的内部调用和既有测试。
+        # 一旦提供范围，就只接受不可变frozenset，避免执行途中
+        # 被其他代码原地add或remove而改变权限。
+        if (
+            allowed_tool_names is not None
+            and not isinstance(
+                allowed_tool_names,
+                frozenset,
+            )
+        ):
+            raise TypeError(
+                "allowed_tool_names必须是"
+                "frozenset或None"
+            )
+
+        if (
+            allowed_tool_names is not None
+            and not all(
+                isinstance(name, str)
+                and bool(name.strip())
+                for name in allowed_tool_names
+            )
+        ):
+            raise ValueError(
+                "allowed_tool_names只能包含"
+                "非空工具名"
+            )
+
         started_at = perf_counter()
+
+        # Planner通常只能看到过滤后的Schema，
+        # 但不能把“模型看不到”当成真正的执行权限控制。
+        # 如果模型、Provider或未来代码仍构造出范围外调用，
+        # Executor会在注册表查找和Handler执行之前稳定拒绝。
+        if (
+            allowed_tool_names is not None
+            and tool_call.tool_name
+            not in allowed_tool_names
+        ):
+            return ToolExecutionResult(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.tool_name,
+                status="rejected",
+                error_code="tool_blocked",
+                public_message=(
+                    "工具不在当前请求允许范围内"
+                ),
+                duration_ms=(
+                    _elapsed_milliseconds(
+                        started_at
+                    )
+                ),
+            )
 
         registered_tool = (
             self._registry.get(
@@ -224,6 +286,86 @@ class ToolExecutor:
                         validated_input
                     )
                 )
+
+        except VisionTimeoutError:
+            # Vision Provider已经把SDK超时转换成稳定的
+            # 应用异常。这里保留“Vision请求超时”语义，
+            # 避免它落入通用tool_execution_error后失去原因。
+            logger.warning(
+                "agent_vision_tool_timeout "
+                "call_id=%s tool=%s",
+                tool_call.call_id,
+                tool_call.tool_name,
+            )
+
+            return ToolExecutionResult(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.tool_name,
+                status="timeout",
+                error_code="vision_timeout",
+                public_message=(
+                    "Vision模型响应超时"
+                ),
+                duration_ms=(
+                    _elapsed_milliseconds(
+                        started_at
+                    )
+                ),
+            )
+
+        except VisionUpstreamError:
+            # 上游错误可能来自连接失败、限流或5xx状态。
+            # 不公开原始异常正文，只返回可审计的稳定错误码。
+            logger.warning(
+                "agent_vision_tool_upstream_error "
+                "call_id=%s tool=%s",
+                tool_call.call_id,
+                tool_call.tool_name,
+            )
+
+            return ToolExecutionResult(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.tool_name,
+                status="error",
+                error_code=(
+                    "vision_upstream_error"
+                ),
+                public_message=(
+                    "Vision上游服务暂时不可用"
+                ),
+                duration_ms=(
+                    _elapsed_milliseconds(
+                        started_at
+                    )
+                ),
+            )
+
+        except InvalidVisionResponseError:
+            # Vision服务已经返回，但内容为空、JSON非法，
+            # 或字段不满足VisionObservation内部契约。
+            logger.warning(
+                "agent_vision_tool_invalid_response "
+                "call_id=%s tool=%s",
+                tool_call.call_id,
+                tool_call.tool_name,
+            )
+
+            return ToolExecutionResult(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.tool_name,
+                status="error",
+                error_code=(
+                    "invalid_vision_response"
+                ),
+                public_message=(
+                    "Vision模型返回无效结果"
+                ),
+                duration_ms=(
+                    _elapsed_milliseconds(
+                        started_at
+                    )
+                ),
+            )
 
         except TimeoutError:
             logger.warning(

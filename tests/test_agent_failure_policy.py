@@ -110,6 +110,18 @@ def test_success_result_is_classified_as_success(
             "error",
             "invalid_tool_output",
         ),
+        (
+            "timeout",
+            "vision_timeout",
+        ),
+        (
+            "error",
+            "vision_upstream_error",
+        ),
+        (
+            "error",
+            "invalid_vision_response",
+        ),
     ],
 )
 def test_non_policy_failures_are_recoverable(

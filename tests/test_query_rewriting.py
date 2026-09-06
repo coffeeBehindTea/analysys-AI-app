@@ -75,6 +75,119 @@ def test_model_and_electrical_terms_are_expanded(
     )
 
 
+def test_dataman_connector_inspection_is_expanded(
+) -> None:
+    """DataMan连接检查应补充手册中的英文词。"""
+
+    # 该问题模拟多模态Agent在观察到
+    # J3接口间隔后发起的知识库查询。
+    result = rewrite_retrieval_query(
+        "DM260 J3连接器存在间隙，"
+        "需要只读检查且不得带电插拔"
+    )
+
+    # 型号必须先由已有归一化模块
+    # 转换成稳定的dataman-260形式。
+    assert "dataman-260" in (
+        result.normalized_query
+    )
+
+    # 新增词只包含型号别名和语义等价词，
+    # 不包含页码、具体结论或操作答案。
+    assert result.added_terms == (
+        "DataMan 260",
+        "DM260",
+        "connector",
+        "cable connector",
+        "connect or disconnect",
+        "precautions",
+    )
+
+    assert result.applied_rule_ids == (
+        "model-dataman-260",
+        "dataman-connector-context",
+        "dataman-connector-precautions-context",
+    )
+
+
+def test_dataman_connector_english_query_is_deduplicated(
+) -> None:
+    """英文查询中已有的连接词不应被重复追加。"""
+
+    result = rewrite_retrieval_query(
+        "DM260 J3 connector visible gap; "
+        "inspection only; do not connect or disconnect"
+    )
+
+    # connector和connect or disconnect已经存在，
+    # 去重逻辑只补充尚未出现的复合词。
+    assert result.added_terms == (
+        "DataMan 260",
+        "DM260",
+        "cable connector",
+        "precautions",
+    )
+
+
+def test_dataman_locking_ring_query_keeps_safety_context(
+) -> None:
+    """Planner压缩后的锁紧环查询仍应找到安全注意事项。
+
+    被测试模块是rewrite_retrieval_query()和
+    dataman-connector-precautions-context规则。
+    输入故意不包含“带电插拔”“只读检查”或
+    “inspection only”，模拟Planner只保留连接状态目标。
+
+    预期流程是先把DM260归一化成dataman-260，再由
+    连接器规则补充英文连接词，最后由锁紧环和检查要求
+    触发安全语境扩展。预期结果包含precautions与
+    connect or disconnect，但不包含页码、Chunk ID或
+    具体安全结论。
+    """
+
+    result = rewrite_retrieval_query(
+        "DM260 J3连接器可见间隙和"
+        "锁紧环未贴合应参考哪些检查要求？"
+    )
+
+    assert result.rewrite_version == (
+        "deterministic-v4"
+    )
+    assert result.added_terms == (
+        "DataMan 260",
+        "DM260",
+        "connector",
+        "cable connector",
+        "connect or disconnect",
+        "precautions",
+    )
+    assert result.applied_rule_ids == (
+        "model-dataman-260",
+        "dataman-connector-context",
+        "dataman-connector-precautions-context",
+    )
+    assert "page: 56" not in (
+        result.rewritten_query
+    )
+    assert ":000087" not in (
+        result.rewritten_query
+    )
+
+
+def test_connector_context_requires_dataman_model(
+) -> None:
+    """普通连接器查询不能被引导到DataMan手册。"""
+
+    result = rewrite_retrieval_query(
+        "机器人J3连接器是否存在间隙？"
+    )
+
+    # 问题没有DataMan 260或DM260型号，
+    # 因此两条型号受限规则都不能执行。
+    assert result.added_terms == ()
+    assert result.applied_rule_ids == ()
+
+
 def test_charge_discharge_temperature_is_expanded(
 ) -> None:
     """充放电温度问题应补充英文手册常用词。"""

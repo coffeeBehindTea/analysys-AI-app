@@ -154,7 +154,7 @@ DEFAULT_AGENT_TIMEOUT_SECONDS = 120.0
 # 它不是Agent Prompt版本：
 #
 # agent-evaluation-v1描述评测方法；
-# agent-tool-calling-v2描述Planner Prompt。
+# agent-tool-calling-v3描述当前按需视觉Planner Prompt。
 AGENT_EVALUATION_VERSION = (
     "agent-evaluation-v1"
 )

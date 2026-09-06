@@ -134,6 +134,9 @@ ToolErrorCode = Literal[
     "empty_result",
     "tool_execution_error",
     "invalid_tool_output",
+    "vision_timeout",
+    "vision_upstream_error",
+    "invalid_vision_response",
 ]
 
 
@@ -393,11 +396,14 @@ class ToolExecutionResult(BaseModel):
 
             "timeout": {
                 "tool_timeout",
+                "vision_timeout",
             },
 
             "error": {
                 "tool_execution_error",
                 "invalid_tool_output",
+                "vision_upstream_error",
+                "invalid_vision_response",
             },
         }
 

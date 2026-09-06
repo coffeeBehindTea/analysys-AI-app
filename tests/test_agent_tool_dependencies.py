@@ -40,6 +40,9 @@ from app.agent.registry import (
 from app.agent.runner import (
     AgentRunner,
 )
+from app.agent.vision_input_store import (
+    RequestVisionInputStore,
+)
 from app.agent.tools.current_time import (
     SystemUtcClock,
 )
@@ -53,8 +56,10 @@ from app.dependencies import (
     get_agent_tool_executor,
     get_agent_tool_registry,
     get_confirmed_evidence_store,
+    get_request_vision_input_store,
     get_robot_telemetry_store,
     get_system_utc_clock,
+    get_vision_input_adapter,
 )
 from app.schemas.agent import (
     ToolCall,
@@ -64,6 +69,9 @@ from app.services.agent_diagnosis_service import (
 )
 from app.services.gated_hybrid_retrieval import (
     GatedHybridRetrievalResult,
+)
+from app.services.fake_vision_provider import (
+    FakeVisionProvider,
 )
 from app.services.hybrid_retrieval_gate import (
     HybridEvidenceGateDecision,
@@ -178,6 +186,10 @@ def build_test_registry(
         telemetry_store,
         ConfirmedEvidenceStore(),
         SystemUtcClock(),
+        FakeVisionProvider(
+            scripted_results={},
+        ),
+        RequestVisionInputStore(),
     )
 
     return registry, retrieval_provider
@@ -341,14 +353,14 @@ def test_telemetry_dependency_reuses_one_process_local_store(
 
 def test_agent_registry_dependency_registers_exact_allowlist(
 ) -> None:
-    """当前依赖装配只能暴露四个明确允许的工具。"""
+    """当前依赖装配只能暴露五个明确允许的工具。"""
 
     registry, retrieval_provider = (
         build_test_registry()
     )
 
     assert isinstance(registry, ToolRegistry)
-    assert len(registry) == 4
+    assert len(registry) == 5
     assert tuple(
         definition.name
         for definition
@@ -358,11 +370,13 @@ def test_agent_registry_dependency_registers_exact_allowlist(
         "get_robot_telemetry",
         "draft_test_case",
         "get_current_time",
+        "analyze_robot_image",
     )
     assert "search_knowledge" in registry
     assert "get_robot_telemetry" in registry
     assert "draft_test_case" in registry
     assert "get_current_time" in registry
+    assert "analyze_robot_image" in registry
     assert "run_shell" not in registry
     assert retrieval_provider.calls == []
 
@@ -388,6 +402,10 @@ def test_registry_shares_request_evidence_store_between_tools(
         telemetry_store,
         evidence_store,
         SystemUtcClock(),
+        FakeVisionProvider(
+            scripted_results={},
+        ),
+        RequestVisionInputStore(),
     )
 
     search_tool = registry.get(
@@ -413,6 +431,48 @@ def test_registry_shares_request_evidence_store_between_tools(
     ) is evidence_store
 
 
+def test_registry_binds_request_vision_dependencies(
+) -> None:
+    """视觉工具必须复用传入的Provider和请求级图片Store。"""
+
+    # 显式创建依赖对象，随后用对象身份检查
+    # get_agent_tool_registry()没有在内部替换它们。
+    vision_provider = FakeVisionProvider(
+        scripted_results={},
+    )
+    vision_input_store = (
+        RequestVisionInputStore()
+    )
+
+    registry = get_agent_tool_registry(
+        FakeGatedRetrievalProvider(),
+        build_demo_robot_telemetry_store(
+            observed_at=FIXED_OBSERVED_AT,
+        ),
+        ConfirmedEvidenceStore(),
+        SystemUtcClock(),
+        vision_provider,
+        vision_input_store,
+    )
+
+    vision_tool = registry.get(
+        "analyze_robot_image"
+    )
+
+    assert vision_tool is not None
+
+    # 当前测试验证的是依赖装配关系，
+    # 所以有意检查Handler保存的内部依赖身份。
+    assert getattr(
+        vision_tool.handler,
+        "_provider",
+    ) is vision_provider
+    assert getattr(
+        vision_tool.handler,
+        "_input_store",
+    ) is vision_input_store
+
+
 def test_confirmed_evidence_dependency_is_request_scoped(
 ) -> None:
     """直接调用依赖两次必须得到两个互不共享的空Store。"""
@@ -420,6 +480,26 @@ def test_confirmed_evidence_dependency_is_request_scoped(
     first = get_confirmed_evidence_store()
     second = get_confirmed_evidence_store()
 
+    assert first is not second
+    assert len(first) == 0
+    assert len(second) == 0
+
+
+def test_vision_input_dependency_is_request_scoped(
+) -> None:
+    """直接调用图片Store依赖两次必须得到两个空实例。"""
+
+    first = get_request_vision_input_store()
+    second = get_request_vision_input_store()
+
+    assert isinstance(
+        first,
+        RequestVisionInputStore,
+    )
+    assert isinstance(
+        second,
+        RequestVisionInputStore,
+    )
     assert first is not second
     assert len(first) == 0
     assert len(second) == 0
@@ -445,9 +525,9 @@ def test_system_clock_dependency_returns_fresh_utc_clock(
     )
 
 
-def test_agent_registry_builds_four_openai_tool_schemas(
+def test_agent_registry_builds_five_openai_tool_schemas(
 ) -> None:
-    """规划模型只能看到注册表生成的四项Tool Schema。"""
+    """规划模型只能看到注册表生成的五项Tool Schema。"""
 
     registry, _ = build_test_registry()
 
@@ -463,6 +543,7 @@ def test_agent_registry_builds_four_openai_tool_schemas(
         "get_robot_telemetry",
         "draft_test_case",
         "get_current_time",
+        "analyze_robot_image",
     ]
 
 
@@ -680,6 +761,7 @@ def test_agent_runner_dependency_connects_real_planner_and_executor(
         "get_robot_telemetry",
         "draft_test_case",
         "get_current_time",
+        "analyze_robot_image",
     )
 
     # 依赖装配没有从HTTP请求读取这些安全边界；
@@ -700,13 +782,26 @@ def test_agent_runner_dependency_connects_real_planner_and_executor(
 
 def test_agent_diagnosis_service_dependency_connects_request_components(
 ) -> None:
-    """Service依赖应复用当前Runner、Planner版本和证据Store。"""
+    """Service依赖应复用当前Runner、证据Store和图片Store。"""
 
     # 显式创建请求级Store。
     #
     # 依赖函数不能再创建第二个空Store，否则search_knowledge
     # 记录的证据不会出现在最终报告构建器的白名单中。
     evidence_store = ConfirmedEvidenceStore()
+    vision_input_store = (
+        RequestVisionInputStore()
+    )
+
+    settings = Settings(
+        _env_file=None,
+        llm_model="planner-test-model",
+    )
+    vision_input_adapter = (
+        get_vision_input_adapter(
+            settings
+        )
+    )
 
     registry = get_agent_tool_registry(
         FakeGatedRetrievalProvider(),
@@ -715,16 +810,17 @@ def test_agent_diagnosis_service_dependency_connects_request_components(
         ),
         evidence_store,
         SystemUtcClock(),
+        FakeVisionProvider(
+            scripted_results={},
+        ),
+        vision_input_store,
     )
     executor = get_agent_tool_executor(registry)
 
     # Planner使用MagicMock客户端，因此构造阶段不会联网。
     planner = get_agent_planner(
         MagicMock(),
-        Settings(
-            _env_file=None,
-            llm_model="planner-test-model",
-        ),
+        settings,
     )
     runner = get_agent_runner(
         planner,
@@ -735,6 +831,8 @@ def test_agent_diagnosis_service_dependency_connects_request_components(
         runner,
         planner,
         evidence_store,
+        vision_input_adapter,
+        vision_input_store,
     )
 
     assert isinstance(
@@ -752,6 +850,14 @@ def test_agent_diagnosis_service_dependency_connects_request_components(
         service,
         "_evidence_store",
     ) is evidence_store
+    assert getattr(
+        service,
+        "_vision_input_adapter",
+    ) is vision_input_adapter
+    assert getattr(
+        service,
+        "_vision_input_store",
+    ) is vision_input_store
     assert getattr(
         service,
         "_planner_prompt_version",

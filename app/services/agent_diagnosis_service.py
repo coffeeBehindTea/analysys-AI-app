@@ -18,6 +18,9 @@ import inspect
 import json
 import logging
 
+from dataclasses import (
+    dataclass,
+)
 from typing import Protocol
 
 from pydantic import (
@@ -28,6 +31,9 @@ from pydantic import (
 from app.agent.evidence_store import (
     ConfirmedEvidenceStore,
 )
+from app.agent.vision_input_store import (
+    RequestVisionInputStore,
+)
 from app.errors import (
     InvalidLLMResponseError,
 )
@@ -36,6 +42,7 @@ from app.schemas.agent_api import (
     AgentDiagnosisResponse,
     AgentExecutionSummary,
     AgentToolTraceEvent,
+    AgentVisionObservation,
 )
 from app.schemas.agent_diagnosis import (
     AgentDiagnosisDraft,
@@ -52,8 +59,15 @@ from app.schemas.agent_tools import (
     RobotTelemetryToolOutput,
     SearchKnowledgeToolOutput,
 )
+from app.schemas.vision import (
+    VisionInput,
+    VisionObservation,
+)
 from app.services.agent_diagnosis_report_builder import (
     build_agent_diagnosis_report_from_draft,
+)
+from app.services.vision_input import (
+    VisionInputAdapter,
 )
 
 
@@ -73,6 +87,18 @@ DEFAULT_AGENT_TASK_GOAL = (
 MAX_AGENT_TASK_LENGTH = 20_000
 
 
+# Agent生产注册表中的只读工具名称。
+#
+# 这里的顺序是稳定的展示顺序，不能由用户请求修改。
+AGENT_READ_ONLY_TOOL_ORDER = (
+    "analyze_robot_image",
+    "search_knowledge",
+    "get_robot_telemetry",
+    "draft_test_case",
+    "get_current_time",
+)
+
+
 # Planner虽然结束，但最终JSON或引用未通过校验时，
 # 公开响应使用固定缺失信息，不能泄漏原始模型输出。
 FINALIZATION_FAILURE_MESSAGE = (
@@ -87,20 +113,52 @@ FINALIZATION_TERMINATION_MESSAGE = (
 )
 
 
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class _PreparedAgentImage:
+    """已经验证、登记并允许提供给Planner的图片摘要。
+
+    这是Service内部对象，不是HTTP Schema。
+
+    它故意不保存Base64和图片字节，只保留Planner选择
+    是否需要视觉工具时真正需要的引用、目标和尺寸信息。
+    """
+
+    image_ref: str
+    analysis_goal: str
+    mime_type: str
+    width_px: int
+    height_px: int
+
+
 class AgentRunnerProvider(Protocol):
     """AgentDiagnosisService需要的最小Runner协议。
 
-    Service只依赖一个异步run方法，
-    因此测试可以传入FakeRunner，
+    Service依赖异步run方法和不可变的注册工具名快照。
+    因此测试可以传入实现同一最小接口的FakeRunner，
     而不必创建真实Planner、Executor或LLM客户端。
     """
+
+    @property
+    def registered_tool_names(
+        self,
+    ) -> frozenset[str]:
+        """返回Runner实际能够执行的注册工具名称。"""
+
+        ...
 
     async def run(
         self,
         task: str,
         /,
+        *,
+        allowed_tool_names: (
+            frozenset[str] | None
+        ) = None,
     ) -> AgentRunResult:
-        """执行一次Agent循环并返回结构化结果。"""
+        """按当前请求的工具范围执行一次Agent循环。"""
 
         ...
 
@@ -139,8 +197,59 @@ def _clean_required_text(
     return cleaned
 
 
+def determine_agent_tool_scope(
+    request: AgentDiagnosisRequest,
+    /,
+) -> frozenset[str]:
+    """根据请求是否携带图片返回结构性的只读工具范围。
+
+    本函数不再根据task_goal或analysis_goal中的关键词猜测
+    用户需要哪一种工具。除Vision以外的已注册只读工具始终
+    对Planner可见；只有请求没有图片时才排除Vision工具，
+    因为此时不存在可以合法传给该工具的image_ref。
+
+    是否真正调用知识检索、模拟遥测、草案或当前时间工具，
+    由Planner根据System Prompt和已经完成的观察决定。
+    ToolExecutor仍会执行工具注册、参数和只读风险边界校验。
+
+    返回frozenset是为了避免调用方在计算完成后原地修改
+    本次请求的工具权限集合。
+    """
+
+    if not isinstance(
+        request,
+        AgentDiagnosisRequest,
+    ):
+        raise TypeError(
+            "request必须是"
+            "AgentDiagnosisRequest"
+        )
+
+    available_tools = set(
+        AGENT_READ_ONLY_TOOL_ORDER
+    )
+
+    # 没有图片时不存在合法image_ref，因此结构性排除Vision。
+    # 该判断只读取Schema字段是否为空，不分析自然语言内容。
+    if not request.images:
+        available_tools.discard(
+            "analyze_robot_image"
+        )
+
+    return frozenset(available_tools)
+
+
 def build_agent_diagnosis_task(
     request: AgentDiagnosisRequest,
+    *,
+    prepared_images: tuple[
+        _PreparedAgentImage,
+        ...,
+    ] = (),
+    allowed_tool_names: tuple[
+        str,
+        ...,
+    ] = (),
 ) -> str:
     """把公开API请求转换成不可信Agent任务数据。
 
@@ -162,6 +271,58 @@ def build_agent_diagnosis_task(
             "AgentDiagnosisRequest"
         )
 
+    if not isinstance(
+        prepared_images,
+        tuple,
+    ):
+        raise TypeError(
+            "prepared_images必须是tuple"
+        )
+
+    if not all(
+        isinstance(
+            item,
+            _PreparedAgentImage,
+        )
+        for item in prepared_images
+    ):
+        raise TypeError(
+            "prepared_images中的元素必须是"
+            "_PreparedAgentImage"
+        )
+
+    if (
+        not isinstance(
+            allowed_tool_names,
+            tuple,
+        )
+        or any(
+            tool_name
+            not in AGENT_READ_ONLY_TOOL_ORDER
+            for tool_name
+            in allowed_tool_names
+        )
+        or len(allowed_tool_names)
+        != len(set(allowed_tool_names))
+    ):
+        raise ValueError(
+            "allowed_tool_names必须是"
+            "不重复的已知只读工具tuple"
+        )
+
+    # 请求中有几张外部图片，就必须有几项已经完成
+    # 适配和登记的内部摘要。
+    #
+    # 这可以防止未来调用者跳过VisionInputAdapter，
+    # 直接把未验证图片描述交给Planner。
+    if len(prepared_images) != len(
+        request.images
+    ):
+        raise ValueError(
+            "prepared_images数量必须与"
+            "request.images一致"
+        )
+
     payload = {
         "data_classification": (
             "untrusted_agent_diagnosis_request"
@@ -175,6 +336,30 @@ def build_agent_diagnosis_task(
             request.task_goal
             or DEFAULT_AGENT_TASK_GOAL
         ),
+
+        # 该列表由服务端策略计算，不接受客户端直接提供。
+        # Planner据此知道本次请求的最小工具边界。
+        "allowed_tools": list(
+            allowed_tool_names
+        ),
+
+        # Planner只看到当前请求内可用的引用和
+        # 经过验证的非敏感元数据。
+        #
+        # 不包含Base64、原始图片字节、文件路径、URL
+        # 或图片SHA-256。
+        "available_images": [
+            {
+                "image_ref": item.image_ref,
+                "analysis_goal": (
+                    item.analysis_goal
+                ),
+                "mime_type": item.mime_type,
+                "width_px": item.width_px,
+                "height_px": item.height_px,
+            }
+            for item in prepared_images
+        ],
     }
 
     # ensure_ascii=False保留中文，
@@ -199,6 +384,84 @@ def build_agent_diagnosis_task(
         )
 
     return task
+
+
+def _prepare_request_images(
+    *,
+    request: AgentDiagnosisRequest,
+    vision_input_adapter: (
+        VisionInputAdapter
+    ),
+    vision_input_store: (
+        RequestVisionInputStore
+    ),
+) -> tuple[
+    _PreparedAgentImage,
+    ...,
+]:
+    """验证请求图片、分配引用并登记到请求级Store。
+
+    函数先适配全部图片，再进行任何Store写入。
+
+    因此第二张图片校验失败时，第一张图片也不会留下
+    部分登记状态。虽然Store只活在当前请求中，这种
+    两阶段处理仍能让函数行为保持原子和容易测试。
+    """
+
+    # 第一阶段：严格解码并验证全部图片。
+    adapted_inputs: tuple[
+        VisionInput,
+        ...,
+    ] = tuple(
+        vision_input_adapter.adapt(
+            payload
+        )
+        for payload in request.images
+    )
+
+    prepared_images: list[
+        _PreparedAgentImage
+    ] = []
+
+    # 第二阶段：所有图片都合法后，统一分配引用并登记。
+    for index, vision_input in enumerate(
+        adapted_inputs,
+        start=1,
+    ):
+        # 三位数字让引用在日志和排序中保持稳定。
+        # 当前请求最多3张，因此从image_001开始足够。
+        image_ref = f"image_{index:03d}"
+
+        vision_input_store.register(
+            image_ref=image_ref,
+            vision_input=vision_input,
+        )
+
+        prepared_images.append(
+            _PreparedAgentImage(
+                image_ref=image_ref,
+                analysis_goal=(
+                    vision_input.analysis_goal
+                ),
+                mime_type=(
+                    vision_input
+                    .metadata
+                    .mime_type
+                ),
+                width_px=(
+                    vision_input
+                    .metadata
+                    .width_px
+                ),
+                height_px=(
+                    vision_input
+                    .metadata
+                    .height_px
+                ),
+            )
+        )
+
+    return tuple(prepared_images)
 
 
 def _compact_summary(
@@ -268,6 +531,9 @@ def _validate_success_output(
         ),
         "get_current_time": (
             GetCurrentTimeToolOutput
+        ),
+        "analyze_robot_image": (
+            VisionObservation
         ),
     }
 
@@ -398,6 +664,39 @@ def _build_input_summary(
             "无输入参数"
         )
 
+    if tool_name == "analyze_robot_image":
+        image_ref = arguments.get(
+            "image_ref"
+        )
+        analysis_goal = arguments.get(
+            "analysis_goal"
+        )
+
+        public_image_ref = (
+            image_ref
+            if isinstance(image_ref, str)
+            else "invalid"
+        )
+
+        analysis_goal_length = (
+            len(analysis_goal)
+            if isinstance(
+                analysis_goal,
+                str,
+            )
+            else 0
+        )
+
+        return _compact_summary(
+            (
+                "分析请求级图片；"
+                f"image_ref={public_image_ref}；"
+                "analysis_goal_chars="
+                f"{analysis_goal_length}"
+            ),
+            max_length=500,
+        )
+
     # 未专门适配的新工具只公开字段数量，
     # 不公开字段名和值。
     return _compact_summary(
@@ -497,6 +796,26 @@ def _build_result_summary(
             "已读取应用服务器UTC系统时间"
         )
 
+    if isinstance(
+        typed_output,
+        VisionObservation,
+    ):
+        return _compact_summary(
+            (
+                "取得结构化视觉观察；"
+                f"status={typed_output.status}；"
+                "image_quality="
+                f"{typed_output.image_quality}；"
+                "observation_count="
+                f"{len(typed_output.observations)}；"
+                "indicator_count="
+                f"{len(typed_output.visible_indicators)}；"
+                "requires_human_check="
+                f"{str(typed_output.requires_human_check).lower()}"
+            ),
+            max_length=1_000,
+        )
+
     # 新工具尚未有专门摘要逻辑时，
     # 只公开输出字段数量。
     field_count = len(
@@ -516,6 +835,7 @@ def _collect_observations(
     run_result: AgentRunResult,
 ) -> tuple[
     list[AgentToolTraceEvent],
+    list[AgentVisionObservation],
     list[RobotTelemetryToolOutput],
     list[DraftTestCaseToolOutput],
     tuple[str, ...],
@@ -525,13 +845,18 @@ def _collect_observations(
     返回值依次是：
 
     1. 脱敏工具轨迹；
-    2. 每个机器人最后一次模拟遥测；
-    3. 实际成功生成的测试草案；
-    4. 测试草案引用的唯一Chunk ID。
+    2. 每次成功视觉工具调用的结构化观察；
+    3. 每个机器人最后一次模拟遥测；
+    4. 实际成功生成的测试草案；
+    5. 测试草案引用的唯一Chunk ID。
     """
 
     traces: list[
         AgentToolTraceEvent
+    ] = []
+
+    vision_observations: list[
+        AgentVisionObservation
     ] = []
 
     # 字典以robot_id作为键。
@@ -608,6 +933,36 @@ def _collect_observations(
 
         if isinstance(
             typed_output,
+            VisionObservation,
+        ):
+            image_ref = (
+                interaction
+                .tool_call
+                .arguments
+                .get("image_ref")
+            )
+
+            try:
+                # AgentVisionObservation会再次校验
+                # step_id、image_ref和视觉输出契约。
+                vision_observations.append(
+                    AgentVisionObservation(
+                        step_id=(
+                            interaction
+                            .step_number
+                        ),
+                        image_ref=image_ref,
+                        observation=typed_output,
+                    )
+                )
+            except ValidationError as exc:
+                raise TypeError(
+                    "analyze_robot_image成功结果"
+                    "缺少合法image_ref"
+                ) from exc
+
+        if isinstance(
+            typed_output,
             DraftTestCaseToolOutput,
         ):
             test_case_drafts.append(
@@ -633,6 +988,7 @@ def _collect_observations(
 
     return (
         traces,
+        vision_observations,
         list(
             telemetry_by_robot_id.values()
         ),
@@ -825,6 +1181,12 @@ class AgentDiagnosisService:
         evidence_store: (
             ConfirmedEvidenceStore
         ),
+        vision_input_adapter: (
+            VisionInputAdapter
+        ),
+        vision_input_store: (
+            RequestVisionInputStore
+        ),
         planner_prompt_version: str,
     ) -> None:
         """注入Runner、请求级证据Store和Prompt版本。"""
@@ -856,9 +1218,33 @@ class AgentDiagnosisService:
                 "ConfirmedEvidenceStore"
             )
 
+        if not isinstance(
+            vision_input_adapter,
+            VisionInputAdapter,
+        ):
+            raise TypeError(
+                "vision_input_adapter必须是"
+                "VisionInputAdapter"
+            )
+
+        if not isinstance(
+            vision_input_store,
+            RequestVisionInputStore,
+        ):
+            raise TypeError(
+                "vision_input_store必须是"
+                "RequestVisionInputStore"
+            )
+
         self._runner = runner
         self._evidence_store = (
             evidence_store
+        )
+        self._vision_input_adapter = (
+            vision_input_adapter
+        )
+        self._vision_input_store = (
+            vision_input_store
         )
         self._planner_prompt_version = (
             _clean_required_text(
@@ -905,14 +1291,68 @@ class AgentDiagnosisService:
             )
         )
 
+        prepared_images = (
+            _prepare_request_images(
+                request=request,
+                vision_input_adapter=(
+                    self
+                    ._vision_input_adapter
+                ),
+                vision_input_store=(
+                    self
+                    ._vision_input_store
+                ),
+            )
+        )
+
+        # 根据请求是否携带图片计算结构性只读工具范围。
+        #
+        # 这里不再通过task_goal关键词猜测工具需求：除Vision外
+        # 的注册只读工具保持可见；无图片时排除Vision。Planner
+        # 负责选择真正必要的工具，Executor仍执行最终安全校验。
+        structural_tool_names = (
+            determine_agent_tool_scope(
+                request
+            )
+        )
+
+        # 结构性范围描述“这一类请求可以使用什么”，Runner快照
+        # 描述“当前实例真正注册了什么”。二者取交集可以兼容只
+        # 装配部分工具的测试或部署，并且不会放宽任何权限。
+        # 这个交集只读取工具名集合，不读取task_goal关键词。
+        allowed_tool_names = (
+            structural_tool_names
+            & self._runner.registered_tool_names
+        )
+
+        # frozenset适合做不可变权限集合，
+        # 但写入任务JSON时需要稳定顺序，方便日志和测试复现。
+        ordered_allowed_tool_names = tuple(
+            tool_name
+            for tool_name
+            in AGENT_READ_ONLY_TOOL_ORDER
+            if tool_name
+            in allowed_tool_names
+        )
+
         task = build_agent_diagnosis_task(
-            request
+            request,
+            prepared_images=prepared_images,
+            allowed_tool_names=(
+                ordered_allowed_tool_names
+            ),
         )
 
         # await暂停当前协程，
         # 让事件循环可以同时处理其他请求。
         run_result = await self._runner.run(
-            task
+            task,
+
+            # Runner会用同一集合同时缩小Planner可见Schema，
+            # 并要求Executor再次检查模型实际返回的工具名。
+            allowed_tool_names=(
+                allowed_tool_names
+            ),
         )
 
         # Protocol主要用于静态类型检查。
@@ -930,6 +1370,7 @@ class AgentDiagnosisService:
 
         (
             traces,
+            vision_observations,
             telemetry_observations,
             test_case_drafts,
             additional_evidence_chunk_ids,
@@ -1088,12 +1529,16 @@ class AgentDiagnosisService:
         # AgentDiagnosisResponse会继续校验：
         #
         # 1. request_id必须和DiagnosisReport一致；
-        # 2. 同一robot_id只能保留一份遥测；
-        # 3. 测试草案引用必须存在于诊断证据列表。
+        # 2. 视觉观察必须与成功视觉步骤一一对应；
+        # 3. 同一robot_id只能保留一份遥测；
+        # 4. 测试草案引用必须存在于诊断证据列表。
         return AgentDiagnosisResponse(
             request_id=cleaned_request_id,
             diagnosis=diagnosis,
             execution=execution,
+            vision_observations=(
+                vision_observations
+            ),
             telemetry_observations=(
                 telemetry_observations
             ),

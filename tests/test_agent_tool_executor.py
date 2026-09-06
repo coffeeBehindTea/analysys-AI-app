@@ -422,6 +422,63 @@ async def test_unknown_tool_returns_rejected_result(
 
 
 @pytest.mark.asyncio
+async def test_request_scope_blocks_registered_tool_before_handler(
+) -> None:
+    """注册工具不在当前请求范围内时也必须拒绝执行。
+
+    被测试模块是ToolExecutor.execute()。
+    测试先把search_knowledge正常注册到ToolRegistry，再把
+    空frozenset作为本次请求范围传入执行器。
+
+    预期流程是执行器先完成ToolCall类型检查，再在注册表
+    查找和参数校验前命中请求级边界。预期返回rejected和
+    tool_blocked，Fake Handler调用次数保持0。
+    """
+
+    handler = RecordingSuccessHandler()
+    executor = make_executor(
+        handler=handler
+    )
+
+    result = await executor.execute(
+        make_call(),
+        allowed_tool_names=frozenset(),
+    )
+
+    assert result.status == "rejected"
+    assert result.error_code == "tool_blocked"
+    assert result.public_message == (
+        "工具不在当前请求允许范围内"
+    )
+    assert handler.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_request_scope_requires_immutable_frozenset(
+) -> None:
+    """执行器不能接受可变set作为请求级权限集合。
+
+    被测试模块是ToolExecutor.execute()；预期在任何Handler
+    执行前抛出TypeError，避免权限在异步执行中途被修改。
+    """
+
+    executor = make_executor(
+        handler=RecordingSuccessHandler()
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="allowed_tool_names",
+    ):
+        await executor.execute(
+            make_call(),
+            allowed_tool_names={
+                "search_knowledge"
+            },
+        )
+
+
+@pytest.mark.asyncio
 async def test_success_validates_input_and_output(
 ) -> None:
     """成功路径应把字典参数转换成工具输入模型。"""

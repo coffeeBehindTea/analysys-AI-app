@@ -28,9 +28,15 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from app.schemas.vision import (
+    ABSOLUTE_MAX_VISION_IMAGE_BYTES,
+    ABSOLUTE_MAX_VISION_IMAGE_DIMENSION_PX,
+    ABSOLUTE_MAX_VISION_IMAGE_PIXELS,
+)
+
 
 class Settings(BaseSettings):
-    """集中读取 LLM 与 Embedding 服务配置。"""
+    """集中读取 LLM、Embedding、Vision 与应用策略配置。"""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -121,6 +127,88 @@ class Settings(BaseSettings):
     max_document_size_bytes: int = Field(
         default=20 * 1024 * 1024,
         ge=1,
+    )
+
+    # ---------- Vision模型与输入策略 ----------
+
+    # Vision服务可能与文本LLM来自不同厂商，
+    # 也可能使用不同权限和不同计费账户。
+    # 因此不自动复用LLM_API_KEY和LLM_BASE_URL。
+    vision_api_key: SecretStr | None = None
+    vision_base_url: HttpUrl | None = None
+    vision_model: str | None = None
+
+    # 单张图片的业务字节上限默认为5 MiB。
+    #
+    # 业务上限比Schema层20 MiB绝对边界更严格，
+    # 可以通过环境变量调小，但不能超过绝对边界。
+    max_vision_image_size_bytes: int = Field(
+        default=5 * 1024 * 1024,
+        ge=1,
+        le=ABSOLUTE_MAX_VISION_IMAGE_BYTES,
+    )
+
+    # 图片任意一边允许的最大像素尺寸。
+    #
+    # 这可以在完整解码像素前拒绝异常宽图或长图。
+    max_vision_image_dimension_px: int = Field(
+        default=4_096,
+        ge=1,
+        le=(
+            ABSOLUTE_MAX_VISION_IMAGE_DIMENSION_PX
+        ),
+    )
+
+    # 图片总像素数的业务上限。
+    #
+    # 文件体积较小不代表解码后的像素较少，
+    # 单独限制总像素有助于防御解压缩炸弹。
+    max_vision_image_pixels: int = Field(
+        default=16_000_000,
+        ge=1,
+        le=ABSOLUTE_MAX_VISION_IMAGE_PIXELS,
+    )
+
+    # Vision Provider单次上游调用的超时时间。
+    #
+    # 输入适配器本身不访问网络；
+    # 该配置将在异步Provider阶段交给超时控制使用。
+    vision_timeout_seconds: float = Field(
+        default=60.0,
+        gt=0.0,
+        le=300.0,
+        allow_inf_nan=False,
+    )
+
+    # ---------- 本地OCR基线策略 ----------
+
+    # Tesseract语言可以使用单一模型，
+    # 也可以使用eng+chi_sim这样的组合。
+    ocr_language: str = Field(
+        default="eng",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-z0-9_+.-]+$",
+    )
+
+    # Tesseract置信度范围是0到100。
+    #
+    # 低于该门槛的结果仍可保留，
+    # 但必须标为low_confidence并要求人工复核。
+    ocr_minimum_confidence: float = Field(
+        default=70.0,
+        ge=0.0,
+        le=100.0,
+        allow_inf_nan=False,
+    )
+
+    # pytesseract会把该值传给Tesseract子进程。
+    # 超时后应终止本次OCR，而不是无限占用工作线程。
+    ocr_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0.0,
+        le=60.0,
+        allow_inf_nan=False,
     )
 
     @model_validator(mode="after")

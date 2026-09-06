@@ -457,6 +457,18 @@ def test_tool_execution_result_accepts_success(
             "error",
             "invalid_tool_output",
         ),
+        (
+            "timeout",
+            "vision_timeout",
+        ),
+        (
+            "error",
+            "vision_upstream_error",
+        ),
+        (
+            "error",
+            "invalid_vision_response",
+        ),
     ],
 )
 def test_tool_execution_result_accepts_documented_failure_shape(

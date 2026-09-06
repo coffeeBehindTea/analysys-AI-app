@@ -10,7 +10,8 @@
 6. Planner不能通过修改嵌套字典污染Runner内部历史；
 7. Planner返回值和Runner构造参数会进行运行时检查；
 8. Planner超时、异常和外部取消使用不同处理路径；
-9. 中止结果保留已完成步骤和结构化缺失信息。
+9. 中止结果保留已完成步骤和结构化缺失信息；
+10. 需要草案的任务在取得足够证据后收窄后续工具范围。
 
 测试不调用真实LLM、Embedding、Chroma、网络或机器人设备。
 """
@@ -92,6 +93,31 @@ class TelemetryInput(BaseModel):
     )
 
     robot_id: str = Field(
+        min_length=1,
+    )
+
+
+class DraftInput(BaseModel):
+    """Fake只读测试草案工具的输入契约。
+
+    objective模拟草案目标；evidence_chunk_ids模拟Planner从
+    已确认知识检索结果中选择的证据引用。该测试契约不生成
+    真实测试步骤，只用于验证Runner的工具推进顺序。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+    )
+
+    objective: str = Field(
+        min_length=1,
+    )
+
+    evidence_chunk_ids: tuple[
+        str,
+        ...,
+    ] = Field(
         min_length=1,
     )
 
@@ -481,6 +507,7 @@ def make_executor(
     *,
     include_empty_tool: bool = False,
     include_timeout_tool: bool = False,
+    include_draft_tool: bool = False,
 ) -> tuple[
     ToolExecutor,
     dict[str, object],
@@ -554,6 +581,27 @@ def make_executor(
         handlers[
             "slow_search"
         ] = slow_handler
+
+    if include_draft_tool:
+        # 草案Handler只记录调用并返回确定性摘要。
+        # Runner测试关心的是调用阶段和工具可见范围，
+        # 真实草案内容契约由draft_test_case专属测试覆盖。
+        draft_handler = (
+            RecordingObservationHandler(
+                label="draft",
+            )
+        )
+        registry.register(
+            definition=make_definition(
+                name="draft_test_case",
+                input_model=DraftInput,
+                risk_level="medium",
+            ),
+            handler=draft_handler,
+        )
+        handlers[
+            "draft_test_case"
+        ] = draft_handler
 
     return (
         ToolExecutor(
@@ -1101,6 +1149,340 @@ async def test_single_tool_trajectory_finishes_after_observation(
         .result.status
         == "success"
     )
+
+
+@pytest.mark.asyncio
+async def test_request_scope_filters_planner_tool_schemas(
+) -> None:
+    """Planner每一轮只能看到当前请求允许的工具Schema。
+
+    被测试模块是AgentRunner.run()。
+    内存Executor注册知识检索和遥测两个工具，但本次运行只
+    允许search_knowledge。ScriptedPlanner先检索再结束。
+
+    预期流程是Runner按frozenset过滤注册表Schema，传给
+    Planner的每轮工具表都只剩search_knowledge；Executor
+    正常执行这一允许工具，Runner最终completed。
+    """
+
+    executor, _ = make_executor()
+    planner = ScriptedPlanner(
+        decisions=(
+            make_tool_decision(
+                call_id="call_scope_search",
+                tool_name="search_knowledge",
+                arguments={
+                    "query": "ERR-NET-4001",
+                },
+            ),
+            make_finish_decision(),
+        ),
+    )
+    runner = AgentRunner(
+        planner=planner,
+        executor=executor,
+    )
+
+    result = await runner.run(
+        "仅检索知识库证据",
+        allowed_tool_names=frozenset({
+            "search_knowledge"
+        }),
+    )
+
+    assert result.state == "completed"
+    assert len(planner.tool_schemas_seen) == 2
+
+    for schemas in planner.tool_schemas_seen:
+        assert [
+            schema["function"]["name"]
+            for schema in schemas
+        ] == ["search_knowledge"]
+
+
+@pytest.mark.asyncio
+async def test_draft_workflow_keeps_search_until_draft_succeeds(
+) -> None:
+    """成功检索次数不能决定何时隐藏知识检索工具。
+
+    被测试模块是AgentRunner.run()以及它调用的
+    _narrow_tool_schemas_after_progress()。测试注册
+    search_knowledge、get_robot_telemetry和draft_test_case，
+    但请求级范围只允许检索与草案。ScriptedPlanner依次提出
+    三个参数不同的成功检索、一次草案，然后主动结束。
+
+    预期流程是前三次检索成功后，Planner仍然能同时看到
+    search_knowledge和draft_test_case；只有draft_test_case
+    成功后，下一轮才隐藏这两个已经完成阶段的工具。
+    预期结果是四次工具调用均成功，Runner正常completed，
+    证明生产流程没有“两次成功检索”这一固定次数阈值。
+    """
+
+    executor, handlers = make_executor(
+        include_draft_tool=True,
+    )
+    planner = ScriptedPlanner(
+        decisions=(
+            make_tool_decision(
+                call_id="call_draft_search_1",
+                tool_name="search_knowledge",
+                arguments={
+                    "query": "连接器J3检查要求",
+                },
+            ),
+            make_tool_decision(
+                call_id="call_draft_search_2",
+                tool_name="search_knowledge",
+                arguments={
+                    "query": "连接器禁止带电插拔",
+                },
+            ),
+            make_tool_decision(
+                call_id="call_draft_search_3",
+                tool_name="search_knowledge",
+                arguments={
+                    "query": "连接器锁紧环与可见间隙",
+                },
+            ),
+            make_tool_decision(
+                call_id="call_draft_create",
+                tool_name="draft_test_case",
+                arguments={
+                    "objective": "形成只读连接检查草案",
+                    "evidence_chunk_ids": [
+                        "demo-document:000001",
+                    ],
+                },
+            ),
+            make_finish_decision(),
+        ),
+    )
+    runner = AgentRunner(
+        planner=planner,
+        executor=executor,
+        max_steps=4,
+    )
+
+    result = await runner.run(
+        "检索连接器证据并生成只读检查草案",
+        allowed_tool_names=frozenset({
+            "search_knowledge",
+            "draft_test_case",
+        }),
+    )
+
+    assert result.state == "completed"
+    assert result.termination_reason == (
+        "planner_finished"
+    )
+    assert tuple(
+        interaction.tool_call.tool_name
+        for interaction in result.interactions
+    ) == (
+        "search_knowledge",
+        "search_knowledge",
+        "search_knowledge",
+        "draft_test_case",
+    )
+
+    search_handler = get_recording_handler(
+        handlers,
+        "search_knowledge",
+    )
+    draft_handler = get_recording_handler(
+        handlers,
+        "draft_test_case",
+    )
+    assert search_handler.call_count == 3
+    assert draft_handler.call_count == 1
+
+    visible_tool_names_by_round = [
+        tuple(
+            schema["function"]["name"]
+            for schema in schemas
+        )
+        for schemas in planner.tool_schemas_seen
+    ]
+    assert visible_tool_names_by_round == [
+        (
+            "search_knowledge",
+            "draft_test_case",
+        ),
+        (
+            "search_knowledge",
+            "draft_test_case",
+        ),
+        (
+            "search_knowledge",
+            "draft_test_case",
+        ),
+        (
+            "search_knowledge",
+            "draft_test_case",
+        ),
+        (),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_non_draft_workflow_keeps_multi_search_available(
+) -> None:
+    """普通诊断不能被草案工作流的检索上限误伤。
+
+    被测试模块仍是AgentRunner.run()的进度感知工具收窄。
+    请求级范围只有search_knowledge，不包含draft_test_case；
+    ScriptedPlanner连续提出三个参数不同的成功检索后结束。
+
+    预期流程是进度策略识别到任务不需要草案，因此每轮继续
+    暴露search_knowledge。预期结果是三个检索都由Executor
+    执行，第四轮仍可见检索工具，Runner正常completed。
+    """
+
+    executor, handlers = make_executor()
+    planner = ScriptedPlanner(
+        decisions=(
+            make_tool_decision(
+                call_id="call_plain_search_1",
+                tool_name="search_knowledge",
+                arguments={"query": "原因证据"},
+            ),
+            make_tool_decision(
+                call_id="call_plain_search_2",
+                tool_name="search_knowledge",
+                arguments={"query": "恢复条件"},
+            ),
+            make_tool_decision(
+                call_id="call_plain_search_3",
+                tool_name="search_knowledge",
+                arguments={"query": "安全限制"},
+            ),
+            make_finish_decision(),
+        ),
+    )
+    runner = AgentRunner(
+        planner=planner,
+        executor=executor,
+        max_steps=3,
+    )
+
+    result = await runner.run(
+        "收集多方面诊断证据",
+        allowed_tool_names=frozenset({
+            "search_knowledge",
+        }),
+    )
+
+    assert result.state == "completed"
+    assert len(result.interactions) == 3
+    assert get_recording_handler(
+        handlers,
+        "search_knowledge",
+    ).call_count == 3
+    assert all(
+        tuple(
+            schema["function"]["name"]
+            for schema in schemas
+        ) == ("search_knowledge",)
+        for schemas in planner.tool_schemas_seen
+    )
+
+
+@pytest.mark.asyncio
+async def test_request_scope_rejects_hidden_tool_at_execution(
+) -> None:
+    """模型构造范围外调用时Executor必须执行期二次拦截。
+
+    被测试模块是AgentRunner与ToolExecutor的组合边界。
+    虽然Planner只被允许看到search_knowledge，Fake Planner
+    故意返回get_robot_telemetry调用，模拟Provider缺陷或
+    模型幻觉。
+
+    预期流程是Runner仍把结构化调用交给带相同范围的
+    Executor；Executor不调用遥测Handler并返回tool_blocked；
+    Runner保存该审计轨迹后以tool_policy_violation中止。
+    """
+
+    executor, handlers = make_executor()
+    planner = ScriptedPlanner(
+        decisions=(
+            make_tool_decision(
+                call_id="call_hidden_telemetry",
+                tool_name="get_robot_telemetry",
+                arguments={
+                    "robot_id": "robot-001",
+                },
+            ),
+        ),
+    )
+    runner = AgentRunner(
+        planner=planner,
+        executor=executor,
+    )
+
+    result = await runner.run(
+        "仅允许知识检索",
+        allowed_tool_names=frozenset({
+            "search_knowledge"
+        }),
+    )
+
+    telemetry_handler = get_recording_handler(
+        handlers,
+        "get_robot_telemetry",
+    )
+    assert telemetry_handler.call_count == 0
+    assert result.state == "aborted"
+    assert result.termination_reason == (
+        "tool_policy_violation"
+    )
+    assert len(result.interactions) == 1
+    assert result.interactions[0].result.error_code == (
+        "tool_blocked"
+    )
+
+
+@pytest.mark.asyncio
+async def test_request_scope_rejects_invalid_values(
+) -> None:
+    """Runner应拒绝可变集合和注册表之外的工具名。
+
+    被测试模块是AgentRunner.run()的入口校验。两个调用都
+    应在Planner收到请求前失败：set触发TypeError，未知工具
+    触发ValueError；ScriptedPlanner的记录保持为空。
+    """
+
+    executor, _ = make_executor()
+    planner = ScriptedPlanner(
+        decisions=(make_finish_decision(),),
+    )
+    runner = AgentRunner(
+        planner=planner,
+        executor=executor,
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="allowed_tool_names",
+    ):
+        await runner.run(
+            "无效可变范围",
+            allowed_tool_names={
+                "search_knowledge"
+            },
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="未注册工具",
+    ):
+        await runner.run(
+            "无效未知工具范围",
+            allowed_tool_names=frozenset({
+                "run_shell"
+            }),
+        )
+
+    assert planner.contexts == []
 
 
 @pytest.mark.asyncio
@@ -1811,8 +2193,6 @@ async def test_duplicate_call_id_aborts_before_second_execution(
         ).call_count
         == 0
     )
-
-
 @pytest.mark.asyncio
 async def test_duplicate_signature_aborts_with_new_call_id(
 ) -> None:

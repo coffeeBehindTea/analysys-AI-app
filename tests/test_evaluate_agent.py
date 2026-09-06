@@ -290,6 +290,9 @@ async def test_single_scenario_success_posts_public_request_and_scores(
         "task_goal": (
             "核对知识证据和当前遥测"
         ),
+        # Week 5扩展后的公开请求始终显式携带images；
+        # 纯文本场景使用空数组，不能夹带图片字节或内部引用。
+        "images": [],
     }
 
     assert result.request_succeeded is True

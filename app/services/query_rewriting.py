@@ -19,13 +19,21 @@ from app.services.lexical_normalization import (
 )
 
 
-# v2增加了组合语义规则。
+# v3增加了DataMan连接器与安全检查的
+# 中英文检索词对齐。
+#
+# v4把Planner可能生成的“间隙、锁紧环、检查要求”等
+# 连接状态查询也归入DataMan连接器安全检查语境。
 #
 # 版本号进入评测报告，用来区分：
 # - deterministic-v1：只执行单个术语扩展；
 # - deterministic-v2：在此基础上增加组合条件扩展。
+# - deterministic-v3：增加受型号条件限制的
+#   DataMan连接器和检查安全术语扩展；
+# - deterministic-v4：扩展Planner常用的连接状态
+#   检查表达，但仍不加入页码或答案事实。
 DETERMINISTIC_QUERY_REWRITE_VERSION = (
-    "deterministic-v2"
+    "deterministic-v4"
 )
 
 
@@ -112,6 +120,80 @@ QUERY_REWRITE_RULES: tuple[
         expansion_terms=(
             "DataMan 260",
             "DM260",
+        ),
+    ),
+    QueryRewriteRule(
+        rule_id=(
+            "dataman-connector-context"
+        ),
+
+        # 这些词都表示连接件或接口。
+        #
+        # 中文、英文和J3接口代号
+        # 出现任意一项都可以触发。
+        trigger_terms=(
+            "连接器",
+            "插头",
+            "插座",
+            "connector",
+            "j3",
+        ),
+
+        # 只有查询中同时存在DataMan 260型号
+        # 才执行这组扩展。
+        #
+        # 这可以避免普通的“机器人连接器”问题
+        # 被错误引导到DataMan设备手册。
+        required_terms=(
+            "dataman-260",
+        ),
+
+        # 扩展词只是连接器概念的英文同义表达，
+        # 不包含连接是否正确或应如何操作的答案。
+        expansion_terms=(
+            "connector",
+            "cable connector",
+        ),
+    ),
+    QueryRewriteRule(
+        rule_id=(
+            "dataman-connector-precautions-context"
+        ),
+
+        # 只有问题本身正在询问检查、连接状态或插拔边界，
+        # 才补充英文安全注意事项检索词。
+        #
+        # Planner在多轮执行中可能把原始任务中的
+        # “不得带电插拔”压缩成“锁紧环检查要求”。
+        # 这些表达仍然属于连接器安全检查语境，
+        # 不能因为自然语言改写而失去手册注意事项检索词。
+        trigger_terms=(
+            "带电插拔",
+            "插拔",
+            "只读检查",
+            "检查草案",
+            "检查要求",
+            "检查步骤",
+            "可见间隙",
+            "锁紧环",
+            "未贴合",
+            "inspection only",
+            "visible gap",
+            "locking ring",
+            "not seated",
+            "do not connect or disconnect",
+        ),
+        required_terms=(
+            "dataman-260",
+        ),
+
+        # 这里只执行双语概念对齐。
+        #
+        # 具体的供电条件、线缆种类和操作限制
+        # 仍必须由后续检索出的真实手册Chunk提供。
+        expansion_terms=(
+            "connect or disconnect",
+            "precautions",
         ),
     ),
     QueryRewriteRule(

@@ -40,6 +40,42 @@ class InvalidEmbeddingResponseError(ApplicationError):
     """Embedding 上游响应不完整或向量不符合约定。"""
 
 
+class VisionInputValidationError(ApplicationError):
+    """图片编码、格式、大小或尺寸不符合视觉输入要求。"""
+
+
+class VisionConfigurationError(ApplicationError):
+    """Vision模型配置缺失或无效。"""
+
+
+class VisionTimeoutError(ApplicationError):
+    """Vision模型请求超过允许的等待时间。"""
+
+
+class VisionUpstreamError(ApplicationError):
+    """Vision上游服务无法连接或返回错误状态。"""
+
+
+class InvalidVisionResponseError(ApplicationError):
+    """Vision模型返回空内容、非法JSON或无效观察结构。"""
+
+
+class OcrConfigurationError(ApplicationError):
+    """Tesseract引擎、语言目录或请求语言配置无效。"""
+
+
+class OcrTimeoutError(ApplicationError):
+    """本地OCR子进程超过允许的执行时间。"""
+
+
+class OcrExecutionError(ApplicationError):
+    """Tesseract进程启动或执行失败。"""
+
+
+class InvalidOcrResponseError(ApplicationError):
+    """Tesseract返回的字段、长度或数值不符合内部预期。"""
+
+
 class DuplicateDocumentError(ApplicationError):
     """相同文件内容已经存在于知识库中。"""
 

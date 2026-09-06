@@ -26,6 +26,7 @@ from app.errors import (
     LLMTimeoutError,
     LLMUpstreamError,
     VectorStoreError,
+    VisionInputValidationError,
 )
 from app.schemas.error import ErrorDetail, ErrorResponse
 
@@ -83,6 +84,18 @@ ERROR_METADATA: dict[type[ApplicationError], ErrorMetadata] = {
         status.HTTP_502_BAD_GATEWAY,
         "invalid_embedding_response",
         "Embedding 服务返回了无法处理的响应",
+    ),
+
+    # ---------- Vision输入错误 ----------
+
+    # Base64、真实图片格式、大小或尺寸无效。
+    #
+    # 这是客户端提交的内容不符合业务契约，
+    # 因此返回422而不是500或502。
+    VisionInputValidationError: (
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "vision_input_validation_error",
+        "图片输入不符合视觉分析要求",
     ),
 
     # ---------- 知识库文档错误 ----------

@@ -1,18 +1,18 @@
 # Robot Knowledge Base and Diagnostic Agent API
 
-一个面向机器人研发场景的工程文档 RAG、证据约束结构化诊断与受控工具调用 Agent 服务。
+一个面向机器人研发场景的工程文档 RAG、证据约束结构化诊断、受控工具调用与多模态现场图片分析服务。
 
-项目支持摄取公开或脱敏的 PDF、Markdown 和 TXT 文档，将文档切分、向量化并持久化到 ChromaDB；用户可以通过自然语言查询知识库，获得只基于检索证据生成的回答和可定位到原始文件、页码或章节的引用。Week 3 在此基础上增加确定性查询归一化、关键词与向量混合检索、RRF 融合、头部保留重排、组合证据门控和结构化诊断 API。Week 4 进一步增加受控 Robot Diagnostic Agent，使模型只能通过注册表中的最小权限工具完成多步诊断任务。
+项目支持摄取公开或脱敏的 PDF、Markdown 和 TXT 文档，将文档切分、向量化并持久化到 ChromaDB；用户可以通过自然语言查询知识库，获得只基于检索证据生成的回答和可定位到原始文件、页码或章节的引用。Week 3 在此基础上增加确定性查询归一化、关键词与向量混合检索、RRF 融合、头部保留重排、组合证据门控和结构化诊断 API。Week 4 进一步增加受控 Robot Diagnostic Agent，使模型只能通过注册表中的只读工具完成多步诊断任务。Week 5 将现场图片安全地接入同一个 Agent，增加图片输入适配、Vision Provider、本地 OCR 与规则解析对照、`analyze_robot_image` 工具、视觉来源标记和 30 场景多模态可靠性评测。
 
-项目同时保留 Week 1 的普通故障分诊与 SSE 接口、Week 2 的文档管理和知识库问答，以及 Week 3 的固定结构化诊断链路，用于比较普通 LLM、RAG 问答、证据约束诊断和多步 Agent 编排之间的职责差异。
+项目同时保留 Week 1 的普通故障分诊与 SSE 接口、Week 2 的文档管理和知识库问答，以及 Week 3 的固定结构化诊断链路，用于比较普通 LLM、RAG 问答、证据约束诊断、文本 Agent 和多模态 Agent 之间的职责差异。
 
 > 本项目是 AI 应用工程学习项目，不是生产级机器人控制或安全认证系统。所有诊断、维修和安全操作仍需由具备资质的人员依据设备原厂资料确认。
 
-> 当前开发阶段：Week 4 任务 1～6 已完成。Agent 使用 `agent-tool-calling-v2` Planner Prompt、白名单工具注册表、最大 5 个工具步骤、30 秒 Planner 超时、连续 2 次工具失败中止和 `agent-confirmed-evidence-v1` 最终证据约束。固定 8 场景实测达到请求成功率 `1.000`、工具选择正确率 `0.750`、任务完成率 `0.750`、引用正确率 `1.000` 和安全拒答率 `1.000`；严格场景总通过率为 `0.500`。
+> 当前开发阶段：Week 5 任务 1～6 已完成。Agent 使用 `agent-tool-calling-v6` Planner Prompt、`robot-vision-observation-v2` Vision Prompt、白名单工具注册表、最大 5 个工具步骤、30 秒 Planner 超时、连续 2 次工具失败中止和 `agent-confirmed-evidence-v1` 最终证据约束。图片先经过本地格式与资源上限校验，再以原生多模态 message content 进入 Vision Provider；完整图片不会写入公开响应和评测轨迹。
 >
-> Week 3 最终候选策略仍为 `deterministic-v2` 查询改写、向量与关键词双路 Top-20、`RRF(k=60)`、`head-preserving-v1` 重排和 `hybrid-evidence-gate-v1` 门控。在当前 31 份 Gold 证据口径下，纯向量 Top-3 完整证据召回为 `15/23=0.652`，最终候选为 `22/23=0.957`。最终在线评测达到：可回答响应率 `0.870`、完整证据回答率 `0.739`、引用正确率 `0.962`、无答案正确拒答率 `1.000`。加入 Week 4 Agent 后的完整离线回归为 `1321 passed`。
+> Week 5 最终 30 场景评测达到：请求成功率 `1.000`、图片观察字段准确性 `0.829`、工具选择正确率 `0.600`、Vision 工具选择正确率 `0.933`、任务完成率 `0.500`、引用正确率 `0.812`、引用覆盖率 `0.619`、来源标注正确率 `0.700`、安全拒答率 `1.000`，严格场景总通过率为 `0.233`。这些指标表明安全拒答和 Vision 调用判断较稳定，但 Planner 的最小工具集合、终止语义和完整任务完成仍有明显改进空间，不能将本项目视为生产就绪系统。
 >
-> 设计与验收依据见 [Week 4 工程总结](docs/工程总结_week4.md)、[Week 4 学习复盘](docs/week4工程复盘.md)、[Agent 架构](docs/agent-architecture.md)、[Agent 失败案例](docs/agent-failure-cases.md)、[Agent 批量评测](docs/agent-evaluation.md)、[Agent 运行轨迹](docs/agent-trace-samples.md)、[策略对比](docs/retrieval-strategy-comparison.md)、[诊断数据契约](docs/diagnosis-schema.md)、[Week 3 测试报告](docs/test-report_week3.md) 和 [Week 3 工程复盘](docs/工程复盘_week3.md)。
+> 当前完整离线回归为 `2214 passed`。Week 5 的主要交付与验收依据见 [多模态工具选择对照实验](docs/multimodal-tool-selection.md)、[多模态场景与字段说明](docs/multimodal-scenarios.md) 和 [多模态 Agent 可靠性评测](docs/multimodal-evaluation.md)；Week 4 及更早阶段的架构与评测资料继续保留在 `docs/` 中。
 
 ## 1. 核心能力
 
@@ -48,15 +48,25 @@
 
 ### Robot Diagnostic Agent
 
-- 提供 `POST /api/v1/agent/diagnose`，输入机器人编号、现象、脱敏日志和可选任务目标。
+- 提供 `POST /api/v1/agent/diagnose`，输入机器人编号、现象、脱敏日志、可选任务目标和最多 3 张 Base64 图片。
 - 使用 `AgentRunner` 实现“规划 → 工具调用 → 观察 → 继续或结束”的受控循环。
-- Planner 只能请求注册表中的 `search_knowledge`、`get_robot_telemetry`、`draft_test_case` 和 `get_current_time`，不能执行任意 Shell、Python、网络或设备控制命令。
+- Planner 只能请求注册表中的 `analyze_robot_image`、`search_knowledge`、`get_robot_telemetry`、`draft_test_case` 和 `get_current_time`，不能执行任意 Shell、Python、任意网址访问或设备控制命令。
 - `search_knowledge` 只返回经过混合检索和确定性门控确认的真实证据，不在工具内部再次调用回答 LLM。
 - `get_robot_telemetry` 只读取进程内的脱敏模拟快照，不连接真实机器人、RCS、WMS 或遥测平台。
 - `draft_test_case` 只根据当前请求已确认的 Chunk 生成确定性测试草案，不执行测试，并始终要求人工批准。
+- `analyze_robot_image` 只读取当前请求已经校验并登记的图片，通过 Vision Provider 返回结构化可见观察，不修改图片、不访问二维码链接，也不把视觉推断伪装成知识库事实。
 - 每次运行都有最大步骤、Planner 超时、工具超时、重复调用、连续失败和权限违规边界。
 - 最终诊断继续沿用 `DiagnosisReport` 和请求级证据白名单，模型不能伪造 Chunk 元数据。
-- 响应包含脱敏工具轨迹、模拟遥测观察、测试草案、终止原因和缺失信息，不暴露完整工具参数、完整日志或模型私有思维链。
+- 响应包含脱敏工具轨迹、视觉观察、模拟遥测观察、测试草案、终止原因和缺失信息，不暴露完整图片、完整工具参数、完整日志或模型私有思维链。
+
+### Vision、OCR 与视觉证据边界
+
+- `VisionImagePayload` 定义外部图片载荷；`VisionInputAdapter` 再执行 Base64 解码、真实格式识别、文件大小、边长、像素数、空内容和解压缩炸弹防护。
+- 适配成功后，服务端为每张图片分配只在当前请求内有效的 `image_001`、`image_002` 等不透明引用，并将验证后的图片放入请求级 `RequestVisionInputStore`。
+- `OpenAICompatibleVisionProvider` 将图片以原生 `image_url` 数据 URL 与文本分析目标共同放入多模态消息，不先生成一份无来源摘要再交给文本模型猜测。
+- `VisionObservation` 把输出限制为可见观察、可见指示器、不确定项和人工复核要求，并固定标记 `source="vision_model"`、模型名、Prompt 版本和来源图片摘要。
+- 本地 `pytesseract` OCR 与确定性规则解析用于纯文字面板基线；Vision 模型用于颜色、部件状态、连接状态和复杂视觉关系；无法辨认或缺少图片时可以直接拒答。
+- 图片中的文字、二维码、网址、命令、Prompt 和密钥样例一律作为不可信数据，不得改变工具白名单、系统约束或日志策略，也不得自动访问其中的链接。
 
 ### 评测与实验
 
@@ -69,6 +79,9 @@
 - 8 条固定 Agent 场景，其中包含 4 条多工具场景和 3 条安全拒答场景。
 - Agent 评测区分请求成功、工具选择、任务完成、证据引用、平均步骤和安全拒答，不使用单个成功样例代替批量结果。
 - 保存正常多工具完成、预期安全拒答和非预期业务失败三类脱敏运行轨迹。
+- 30 条多模态 Agent 场景，包含 8 条正常图片、8 条噪声或低质量图片、6 条缺失信息或无法判断图片、4 条图文冲突场景和 4 条提示注入或高风险场景。
+- 多模态评测统计图片观察字段准确性、工具选择、Vision 工具选择、任务完成、引用、来源标注、安全拒答、工具步骤、P50/P95 延迟和可估算成本覆盖率。
+- LLM-as-judge 只作为等价表达的辅助指标；确定性字段、证据引用、安全规则和人工抽查仍是主要判断依据。
 - 使用 Fake Embedding、Fake LLM 和 Mock HTTP 完成无网络测试。
 
 ## 2. RAG 与 Agent 在整体 AI 应用架构中的位置
@@ -138,25 +151,34 @@ RAG 不负责训练模型，也不会把全部文档直接放进 Prompt。它把
 ```mermaid
 flowchart TD
     Client["客户端诊断请求"]
+    Image["Base64图片载荷<br/>不可信用户数据"]
     Middleware["RequestIdMiddleware<br/>生成请求追踪 ID"]
     AgentRouter["Agent Router<br/>校验 HTTP 请求"]
     Service["AgentDiagnosisService<br/>编排请求并构造公开响应"]
+    VisionAdapter["VisionInputAdapter<br/>解码并校验格式与资源上限"]
+    VisionStore["RequestVisionInputStore<br/>保存当前请求验证后的图片"]
     Runner["AgentRunner<br/>控制循环与终止边界"]
     Planner["OpenAICompatibleAgentPlanner<br/>只返回结构化下一步决定"]
     Executor["ToolExecutor<br/>校验名称、参数、权限、超时和输出"]
     Registry["ToolRegistry<br/>只暴露已注册工具"]
+    VisionTool["analyze_robot_image<br/>读取当前请求图片"]
+    VisionProvider["Vision Provider<br/>原生多模态输入与结构化观察"]
     Knowledge["search_knowledge<br/>门控混合检索与真实引用"]
     Telemetry["get_robot_telemetry<br/>脱敏模拟内存快照"]
     Draft["draft_test_case<br/>待人工批准的确定性草案"]
     Clock["get_current_time<br/>服务器 UTC 时间"]
     Evidence["ConfirmedEvidenceStore<br/>当前请求的真实证据白名单"]
     Builder["Report Builder<br/>校验最终草稿和引用"]
-    Response["AgentDiagnosisResponse<br/>诊断、轨迹、观察和草案"]
+    Response["AgentDiagnosisResponse<br/>诊断、轨迹、视觉观察、遥测和草案"]
 
     Client --> Middleware --> AgentRouter --> Service --> Runner
+    Image --> Client
+    Service --> VisionAdapter --> VisionStore
     Runner --> Planner
     Planner --> Runner
     Runner --> Executor --> Registry
+    Registry --> VisionTool
+    VisionStore --> VisionTool --> VisionProvider --> Runner
     Registry --> Knowledge
     Registry --> Telemetry
     Registry --> Draft
@@ -176,14 +198,15 @@ flowchart TD
 HTTP请求
 → RequestIdMiddleware：生成并传播request_id
 → Agent Router：校验AgentDiagnosisRequest并注入Service
-→ AgentDiagnosisService：把用户字段序列化为不可信任务数据
+→ AgentDiagnosisService：把用户字段序列化为不可信任务数据；图片先交给VisionInputAdapter校验并登记到请求级Store
 → AgentRunner：请求Planner决定下一步
 → OpenAICompatibleAgentPlanner：返回结构化call_tool或finish决定
 → ToolExecutor：只从ToolRegistry查找工具，并校验输入、权限、超时和输出
-→ 注册工具：返回经过Pydantic校验的观察结果
+→ analyze_robot_image（需要图片时）：按image_ref读取当前请求图片并调用Vision Provider，返回带来源标记的VisionObservation
+→ 其他注册工具：返回经过Pydantic校验的知识证据、模拟遥测、草案或服务器时间
 → AgentRunner：记录观察并再次规划，直到正常完成或安全中止
-→ AgentDiagnosisService：生成脱敏轨迹，校验最终草稿和请求级证据白名单
-→ AgentDiagnosisResponse：返回结构化诊断、执行摘要、模拟遥测和测试草案
+→ AgentDiagnosisService：生成脱敏轨迹，校验最终草稿、视觉观察对应关系和请求级证据白名单
+→ AgentDiagnosisResponse：返回结构化诊断、执行摘要、视觉观察、模拟遥测和测试草案
 ```
 
 Agent 的内部生命周期为：
@@ -203,6 +226,7 @@ received
 
 | 工具 | 用途 | 风险级别 | 只读 | 单次超时 | 关键边界 |
 |---|---|---:|---:|---:|---|
+| `analyze_robot_image` | 观察当前请求图片中的可见文字、指示器和部件状态 | `low` | 是 | 120 秒 | 只能读取当前请求的图片引用；输出是视觉观察，不是知识库工程结论 |
 | `search_knowledge` | 检索故障代码、设备手册、安全标准和测试规程 | `low` | 是 | 120 秒 | 只返回门控确认的真实引用，不生成最终回答 |
 | `get_robot_telemetry` | 按机器人编号读取脱敏模拟快照 | `low` | 是 | 2 秒 | 数据源固定标记为 `simulated_memory`，不连接真实设备 |
 | `draft_test_case` | 根据已确认 Chunk 生成测试草案 | `medium` | 是 | 2 秒 | 不调用 LLM、不执行测试，输出要求人工批准 |
@@ -220,6 +244,8 @@ received
 | `openai` | 调用 OpenAI 兼容的 LLM 和 Embedding API |
 | `chromadb` | 本地向量持久化与相似度检索 |
 | `pdfplumber` | 提取文本型 PDF 的逐页正文 |
+| `Pillow` | 解码图片、识别真实格式、读取尺寸并执行像素安全检查 |
+| `pytesseract` | 调用本地 Tesseract OCR，建立纯文字面板识别基线 |
 | `python-multipart` | 解析 FastAPI 文件上传请求 |
 | `httpx` | 异步 HTTP 客户端和 API 测试 |
 | `sse-starlette` | Week 1 故障分诊 SSE 流式响应 |
@@ -234,22 +260,23 @@ received
 - Windows PowerShell、Bash 或其他终端
 - 真实摄取和查询需要 OpenAI 兼容的 Embedding API
 - 生成回答、故障分诊和 Agent 规划需要 OpenAI 兼容的生成式 LLM API
+- 多模态 Agent 的真实图片观察需要支持图片输入的 OpenAI 兼容 Vision API
+- 运行本地 OCR 路线需要安装 Tesseract，并至少提供 `eng` 语言数据；需要识别中文时还应提供 `chi_sim`
 
-LLM 和 Embedding 可以使用不同的服务商、密钥、Base URL 和模型。
+LLM、Embedding 和 Vision 可以使用不同的服务商、密钥、Base URL 和模型。Vision 配置不会自动复用文本 LLM 配置，避免图片被意外发送到错误服务。
 
 自动化测试通过 Fake、Mock、依赖覆盖和临时 Chroma 目录运行，不需要真实 API Key，也不应访问外部网络。
 
-当前离线回归覆盖 Week 1～3 全部功能和 Week 4 任务 1～6 的 Agent 功能，共 `1321` 项：
+当前离线回归覆盖 Week 1～4 全部功能和 Week 5 任务 1～6 的多模态功能，共 `2214` 项：
 
 ```text
-tests    : 1321
+tests    : 2214
 failures : 0
 errors   : 0
 skipped  : 0
-time     : 7.058s
 ```
 
-对应的 [Week 4 最终 JUnit 报告](docs/pytest-results-week4-final.xml) 已经生成。该报告同时覆盖原有 Week 3 回归与新增 Agent 功能，并已从公开版本中删除测试机生成时间和主机名。
+这组结果来自完成 Week 5 修改后的完整本地回归，不是根据测试文件数量推算。自动化测试使用 Fake Provider、Mock HTTP、FastAPI 依赖覆盖和临时目录，不需要真实 API Key，也不应访问外部网络。
 
 ## 5. 创建环境并安装依赖
 
@@ -349,6 +376,11 @@ EMBEDDING_API_KEY=your-embedding-api-key
 EMBEDDING_BASE_URL=https://your-embedding-provider.example/v1
 EMBEDDING_MODEL=your-embedding-model-name
 
+# Vision服务；不会自动复用文本LLM配置
+VISION_API_KEY=your-vision-api-key
+VISION_BASE_URL=https://your-vision-provider.example/v1
+VISION_MODEL=your-vision-model-name
+
 # ChromaDB
 CHROMA_PERSIST_DIRECTORY=chroma_data
 CHROMA_COLLECTION_NAME=robot_knowledge
@@ -363,16 +395,29 @@ RAG_SIMILARITY_THRESHOLD=0.60
 
 # 单文件上限：20 MiB
 MAX_DOCUMENT_SIZE_BYTES=20971520
+
+# 单张图片资源上限与Vision请求超时
+MAX_VISION_IMAGE_SIZE_BYTES=5242880
+MAX_VISION_IMAGE_DIMENSION_PX=4096
+MAX_VISION_IMAGE_PIXELS=16000000
+VISION_TIMEOUT_SECONDS=60
+
+# 本地Tesseract OCR基线
+OCR_LANGUAGE=eng
+OCR_MINIMUM_CONFIDENCE=70
+OCR_TIMEOUT_SECONDS=10
 ```
 
 重要说明：
 
 - `.env` 可能包含真实 API Key，不得提交。
-- LLM 和 Embedding 配置彼此独立。
+- LLM、Embedding 和 Vision 配置彼此独立。
 - 修改 `.env` 后应重启 FastAPI。
 - 同一个 Chroma Collection 中应使用相同的 Embedding 模型和向量维度。
 - 更换 Embedding 模型后应使用新的 Collection 名称并重新摄取。
 - `0.60` 是当前语料、模型和评测集上的校准结果，不是通用阈值。
+- 图片输入默认限制为单张不超过 5 MiB、任意一边不超过 4096 像素、总像素不超过 1600 万；请求 Schema 另外限制一次 Agent 请求最多 3 张图片。
+- `OCR_MINIMUM_CONFIDENCE` 只决定 OCR 结果是否标记为低置信度，不能把低置信结果提升为已确认工程事实。
 
 ## 7. 准备语料
 
@@ -738,18 +783,54 @@ python -c "import json, httpx; response = httpx.post('http://127.0.0.1:8000/api/
 
 ### 运行 Robot Diagnostic Agent
 
-先启动 API，再执行以下单行命令。请求中的 `log_excerpt` 必须是已经脱敏的日志摘要；客户端不能指定工具、最大步数或权限。
+先启动 API，再执行以下单行命令。请求中的 `log_excerpt` 必须是已经脱敏的日志摘要；客户端不能指定工具、最大步数或权限。纯文本请求继续兼容，`images` 省略时默认为空列表。
 
 ```powershell
 python -c "import json, httpx; response = httpx.post('http://127.0.0.1:8000/api/v1/agent/diagnose', json={'robot_id': 'robot-001', 'symptom': '调度网络已经恢复，但机器人仍处于暂停状态，没有继续原任务', 'log_excerpt': 'ERR-NET-4001 heartbeat timeout exceeded 1500 ms; network_connected=true; speed_mps=0.0', 'task_goal': '核对故障依据、当前模拟遥测和安全恢复条件，并生成待人工批准的测试草案'}, timeout=180.0); print('HTTP:', response.status_code); print('X-Request-ID:', response.headers.get('x-request-id')); print(json.dumps(response.json(), ensure_ascii=False, indent=2))"
 ```
 
-一次成功响应由四部分组成：
+多模态请求需要先读取本地图片并转换为 Base64。下面的 PowerShell 示例使用仓库内的脱敏教学样本；`ConvertTo-Json -Depth 8` 用于完整序列化嵌套的 `images` 列表：
+
+```powershell
+$imagePath = Resolve-Path `
+    "data/multimodal/tool-selection/multimodal-001.png"
+
+$imageBase64 = [Convert]::ToBase64String(
+    [IO.File]::ReadAllBytes($imagePath)
+)
+
+$requestBody = @{
+    robot_id = "robot-vision-demo"
+    symptom = "设备面板状态需要核对"
+    log_excerpt = "sanitized panel inspection request"
+    task_goal = "只根据图片读取可见状态，并区分视觉观察与工程结论"
+    images = @(
+        @{
+            mime_type = "image/png"
+            encoding = "base64"
+            image_base64 = $imageBase64
+            analysis_goal = "读取图片中可见的故障码、网络状态和任务状态"
+            detail = "auto"
+        }
+    )
+} | ConvertTo-Json -Depth 8
+
+$response = Invoke-RestMethod `
+    -Uri "http://127.0.0.1:8000/api/v1/agent/diagnose" `
+    -Method Post `
+    -ContentType "application/json; charset=utf-8" `
+    -Body ([Text.Encoding]::UTF8.GetBytes($requestBody))
+
+$response | ConvertTo-Json -Depth 12
+```
+
+一次成功响应由五部分组成：
 
 | 字段 | 职责 |
 |---|---|
 | `diagnosis` | 沿用 Week 3 `DiagnosisReport` 的结构化诊断、真实证据和引用白名单 |
 | `execution` | Agent 的终止原因、完成步骤和脱敏工具轨迹 |
+| `vision_observations` | 本次成功调用 `analyze_robot_image` 得到的结构化视觉观察；未调用或调用失败时为空 |
 | `telemetry_observations` | 本次实际读取的脱敏模拟遥测；未调用遥测工具时为空 |
 | `test_case_drafts` | 本次实际生成的待人工批准草案；未调用草案工具时为空 |
 
@@ -760,7 +841,7 @@ python -c "import json, httpx; response = httpx.post('http://127.0.0.1:8000/api/
   "request_id": "request-id",
   "diagnosis": {
     "request_id": "request-id",
-    "prompt_version": "agent-tool-calling-v2",
+    "prompt_version": "agent-tool-calling-v6",
     "gate_version": "agent-confirmed-evidence-v1",
     "status": "completed",
     "symptoms": [
@@ -800,7 +881,7 @@ python -c "import json, httpx; response = httpx.post('http://127.0.0.1:8000/api/
     "abstained": false
   },
   "execution": {
-    "planner_prompt_version": "agent-tool-calling-v2",
+    "planner_prompt_version": "agent-tool-calling-v6",
     "state": "completed",
     "termination_reason": "planner_finished",
     "termination_message": "Agent规划正常结束",
@@ -840,6 +921,7 @@ python -c "import json, httpx; response = httpx.post('http://127.0.0.1:8000/api/
     ],
     "missing_information": []
   },
+  "vision_observations": [],
   "telemetry_observations": [
     {
       "robot_id": "robot-001",
@@ -915,14 +997,14 @@ Planner 超时、无效结构、最大步数、重复调用、连续工具失败
 data/source/*
 data/processed/
 chroma_data/
+chroma_data.*/
 __pycache__/
 .pytest_cache/
 要求.txt
 week*验收.txt
-week1.txt
-week2.txt
-week3.txt
+week[0-9]*.txt
 docs中的原始JSON和含长原文评测报告
+docs/multimodal-evaluation-v*.md
 ```
 
 目录职责：
@@ -932,8 +1014,13 @@ docs中的原始JSON和含长原文评测报告
 | `data/source/` | 原始 PDF、MD、TXT | 否，只保留 `.gitkeep` |
 | `data/processed/` | 解析和切分中间结果 | 否 |
 | `data/eval/gold_questions.jsonl` | 28 条评测问题及其预期证据位置 | 是 |
+| `data/eval/multimodal_tool_selection_cases.jsonl` | OCR、Vision 和直接拒答路线的 6 条对照样本契约 | 是 |
+| `data/eval/multimodal_scenarios.jsonl` | 30 条多模态 Agent 场景、预期工具、来源和安全要求 | 是 |
+| `data/multimodal/tool-selection/` | 为教学评测生成的脱敏图片样本 | 是 |
 | `chroma_data/` | ChromaDB 向量和元数据 | 否 |
+| `chroma_data.*/` | 本地 Chroma 排障备份 | 否 |
 | `docs/` | 脱敏后的报告、架构和测试说明 | 只提交不含长原文的公开版本 |
+| `docs/multimodal-traces/` | 不含图片正文、密钥、本地路径和模型私有思维链的审计轨迹 | 是 |
 | `.env` | 密钥和真实配置 | 否 |
 | `.env.example` | 无密钥配置模板 | 是 |
 
@@ -1190,26 +1277,73 @@ python -m scripts.evaluate_agent `
 
 轨迹的逐步解释和三类结果对照见 [Agent 完整运行轨迹样例](docs/agent-trace-samples.md)，完整批量指标见 [Robot Diagnostic Agent 评测报告](docs/agent-evaluation.md)。轨迹只保留工具名、脱敏摘要、状态、耗时、错误码和可公开结果，不保存 API Key、认证头、完整敏感日志、Planner 原始响应或模型私有思维链。
 
-## 16. 自动化测试
+## 16. Week 5 多模态评测
+
+### OCR、Vision 与直接拒答的路线对比
+
+`scripts/evaluate_multimodal_tool_selection.py` 会让同一批 6 个脱敏样本分别经过本地 OCR 加规则解析、Vision 模型和直接拒答三条路线。实验的目的不是选出一个对所有图片都最好的工具，而是确认每条路线的适用边界：
+
+- 纯文字面板优先考虑 OCR 与确定性规则，因为结果可逐字段追踪且不需要视觉模型推理。
+- 颜色、指示灯、部件连接和空间关系需要 Vision 模型，因为 OCR 只能读取字符，不能可靠解释视觉状态。
+- 图片缺失、严重遮挡或无法辨认时，直接拒答比猜测更安全。
+
+完整对照表见 [多模态工具选择对照实验](docs/multimodal-tool-selection.md)。
+
+### 30 场景 Agent 可靠性评测
+
+运行真实批量评测：
+
+```powershell
+python -m scripts.evaluate_multimodal `
+    --enable-llm-judge `
+    --llm-judge-timeout-seconds 30 `
+    --json-output "docs/multimodal-evaluation.json" `
+    --markdown-output "docs/multimodal-evaluation.md"
+```
+
+最终公开报告的主要结果如下：
+
+| 指标 | 结果 |
+|---|---:|
+| 请求成功率 | 1.000 |
+| 场景总通过率 | 0.233 |
+| 图片观察字段准确性 | 0.829 |
+| 工具选择正确率 | 0.600 |
+| Vision 工具选择正确率 | 0.933 |
+| 任务完成率 | 0.500 |
+| 引用正确率 | 0.812 |
+| 引用覆盖率 | 0.619 |
+| 信息来源标注正确率 | 0.700 |
+| 安全拒答率 | 1.000 |
+| 平均工具步骤数 | 2.400 |
+| P50 延迟 | 21778.774 ms |
+| P95 延迟 | 62020.046 ms |
+
+场景总通过率是严格的联合指标：图片观察、工具集合、任务完成、引用、来源标注、安全规则和拒答行为必须同时满足 Gold，一项失败就判定整条场景失败。因此它不会等于任何单项准确率，也不能仅凭请求返回 HTTP 200 推断通过。
+
+当前批次没有取得可用于计价的 Planner、Vision 和辅助 Judge Token usage，所以成本估算覆盖率为 `0.000`，金额显示为“无法估算”。这表示缺少可靠计量数据，不表示调用成本为零；报告不会使用延迟、工具次数或文字长度伪造金额。
+
+公开报告包含失败原因和修正记录。`docs/multimodal-traces/` 另外保存 3 份代表性完整脱敏轨迹，并保存通过响应契约校验但确定性评分失败的脱敏轨迹，便于核对工具状态与错误码。轨迹不包含完整图片、请求级 Base64、本地图片路径、Authorization、API Key、完整敏感日志或模型私有思维链。
+
+## 17. 自动化测试
 
 运行全部测试并生成最终机器可读报告。`pytest.ini` 会自动把测试临时目录固定到项目内的 `.pytest_tmp`：
 
 ```powershell
-# 运行全部离线测试，并生成Week 4最终JUnit报告。
-python -m pytest --junitxml="docs/pytest-results-week4-final.xml"
+# 运行Week 1至Week 5的全部离线测试。
+python -m pytest
 ```
 
-当前源码在完成 Week 4 全部任务后的最终完整回归结果为 `1321 passed`：
+当前源码在完成 Week 5 全部任务后的最终完整回归结果为 `2214 passed`：
 
 ```text
-tests    : 1321
+tests    : 2214
 failures : 0
 errors   : 0
 skipped  : 0
-time     : 7.058s
 ```
 
-上述数字来自 [Week 4 最终 JUnit 报告](docs/pytest-results-week4-final.xml)，不是从 `.pytest_cache` 或测试文件数量推算得到。报告包含 Week 1 至 Week 4 的完整离线回归，证明新增 Agent 模块没有破坏第三周已有的检索、门控、引用和结构化诊断能力。公开版本已删除测试机生成时间和主机名，但保留测试数、失败数、错误数、跳过数、耗时以及每个测试用例的结果。
+上述数字来自完成 Week 5 修改后的完整本地回归，不是从 `.pytest_cache` 或测试文件数量推算得到。回归同时覆盖 Week 1 至 Week 4 的旧功能与 Week 5 的图片校验、Vision、OCR、视觉工具、多模态 API、场景执行、确定性评分、辅助 Judge、报告生成和轨迹脱敏能力。
 
 核心测试使用：
 
@@ -1259,14 +1393,21 @@ time     : 7.058s
 - Agent API 请求校验、依赖注入、完成响应、安全中止响应和脱敏轨迹；
 - `search_knowledge` 的纯检索边界，确保工具内部不嵌套调用回答 LLM；
 - Agent 固定场景契约、批量 HTTP 执行、工具顺序评分、任务完成评分、引用评分、安全拒答评分和报告生成。
+- Vision 图片 Base64、MIME、真实格式、大小、边长、像素数、空内容和超时校验；
+- Vision Provider 的原生多模态消息、结构化输出、空响应、非法 JSON 和上游异常转换；
+- Tesseract OCR、置信度、文字边界框和确定性规则解析；
+- `analyze_robot_image` 的请求级图片引用、只读权限、提示注入边界、空观察与高风险内容处理；
+- 多模态 Agent 的视觉观察、知识证据、用户日志和模拟遥测来源分层；
+- 30 条场景的图片预检、批量执行、确定性评分、辅助 Judge、延迟分位数、成本覆盖率和脱敏轨迹生成。
 
-## 17. 项目结构
+## 18. 项目结构
 
 ```text
 analysys-AI-app/
 ├── app/
 │   ├── agent/
 │   │   ├── tools/
+│   │   │   ├── analyze_robot_image.py
 │   │   │   ├── current_time.py
 │   │   │   ├── draft_test_case.py
 │   │   │   ├── robot_telemetry.py
@@ -1278,7 +1419,8 @@ analysys-AI-app/
 │   │   ├── openai_planner.py
 │   │   ├── planner.py
 │   │   ├── registry.py
-│   │   └── runner.py
+│   │   ├── runner.py
+│   │   └── vision_input_store.py
 │   ├── middleware/
 │   │   └── request_id.py
 │   ├── routers/
@@ -1299,9 +1441,15 @@ analysys-AI-app/
 │   │   ├── evaluation.py
 │   │   ├── knowledge.py
 │   │   ├── knowledge_query.py
+│   │   ├── multimodal_agent_evaluation.py
+│   │   ├── multimodal_tool_selection.py
+│   │   ├── multimodal_tool_selection_evaluation.py
+│   │   ├── ocr.py
+│   │   ├── ocr_rule.py
 │   │   ├── retrieval.py
 │   │   ├── retrieval_strategy.py
-│   │   └── triage.py
+│   │   ├── triage.py
+│   │   └── vision.py
 │   ├── services/
 │   │   ├── agent_diagnosis_report_builder.py
 │   │   ├── agent_diagnosis_service.py
@@ -1320,10 +1468,18 @@ analysys-AI-app/
 │   │   ├── keyword_retrieval.py
 │   │   ├── knowledge_answer.py
 │   │   ├── lexical_normalization.py
+│   │   ├── multimodal_tool_selection_executor.py
+│   │   ├── multimodal_tool_selection_experiment.py
+│   │   ├── ocr_provider.py
+│   │   ├── ocr_rule_parser.py
 │   │   ├── query_rewriting.py
 │   │   ├── query_rewriting_retrieval.py
 │   │   ├── retrieval_scope.py
-│   │   └── vector_store.py
+│   │   ├── vector_store.py
+│   │   ├── vision_client.py
+│   │   ├── vision_input.py
+│   │   ├── vision_prompts.py
+│   │   └── vision_provider.py
 │   ├── config.py
 │   ├── dependencies.py
 │   ├── errors.py
@@ -1331,7 +1487,11 @@ analysys-AI-app/
 ├── data/
 │   ├── eval/
 │   │   ├── agent_scenarios.jsonl
-│   │   └── gold_questions.jsonl
+│   │   ├── gold_questions.jsonl
+│   │   ├── multimodal_scenarios.jsonl
+│   │   └── multimodal_tool_selection_cases.jsonl
+│   ├── multimodal/
+│   │   └── tool-selection/
 │   ├── processed/
 │   └── source/
 │       └── .gitkeep
@@ -1349,11 +1509,16 @@ analysys-AI-app/
 │   ├── corpus-sources.md
 │   ├── architecture.md
 │   ├── diagnosis-schema.md
+│   ├── multimodal-evaluation.md
+│   ├── multimodal-scenarios.md
+│   ├── multimodal-tool-selection.md
+│   ├── multimodal-traces/
 │   ├── retrieval-strategy-comparison.md
 │   ├── test-report_week3.md
 │   ├── 工程复盘_week3.md
 │   ├── week4工程复盘.md
 │   ├── 工程总结_week4.md
+│   ├── 工程总结_week5.md
 │   ├── reproducibility.md
 │   ├── pytest-results-week3-final.xml
 │   └── pytest-results-week4-final.xml
@@ -1363,7 +1528,11 @@ analysys-AI-app/
 │   ├── evaluate_agent.py
 │   ├── evaluate_citations.py
 │   ├── evaluate_hybrid_gate.py
+│   ├── evaluate_multimodal.py
+│   ├── evaluate_multimodal_tool_selection.py
 │   ├── evaluate_retrieval_strategies.py
+│   ├── generate_multimodal_agent_scenarios.py
+│   ├── generate_multimodal_tool_selection_samples.py
 │   ├── ingest_documents.py
 │   └── smoke_hybrid_retrieval.py
 ├── tests/
@@ -1374,7 +1543,7 @@ analysys-AI-app/
 └── requirements.txt
 ```
 
-## 18. 已知限制
+## 19. 已知限制
 
 - `pdfplumber` 适用于含文本层的 PDF，不提供完整 OCR。
 - 扫描版 PDF、复杂表格、多栏排版和图片文字可能解析不完整。
@@ -1388,10 +1557,14 @@ analysys-AI-app/
 - q025 在通用Prompt下会保守拒答严格等号边界问题。
 - 知识库 RAG 只处理当前静态语料，本身不能回答实时位置、电量和订单。
 - Agent 当前读取的是进程内脱敏模拟遥测，不是来自真实 RCS、WMS、机器人或生产遥测平台的数据；进程重启后会重新创建模拟 Store。
-- 当前四个 Agent 工具全部只读，不包含机器人控制、任务下发、远程命令、数据修改或真实测试执行能力。
+- 当前五个 Agent 工具全部只读，不包含机器人控制、任务下发、远程命令、数据修改或真实测试执行能力。
 - `draft_test_case` 使用确定性模板生成待人工批准草案，不是已经执行的测试，也不能替代设备原厂规程和现场风险评估。
 - Planner 依赖外部生成式 LLM。兼容服务可能一次建议多个工具；当前单步 ReAct 循环只选择第一个工具执行，再根据观察重新规划，因此服务端可能出现 `agent_planner_parallel_tool_calls_serialized` 警告。
-- 当前固定 Agent 评测只有 4/8 场景满足全部 Gold 条件。安全拒答率和引用正确率均为 1.000，但 Planner 在停止时机、最小工具集合、完整证据利用和高风险终止语义方面仍不稳定，因此当前结果不能视为生产就绪。
+- 当前 30 场景多模态评测的严格总通过率为 `0.233`。安全拒答率为 `1.000`，但 Planner 在最小工具集合、停止时机、任务完成、来源标注和完整证据利用方面仍不稳定，因此当前结果不能视为生产就绪。
+- Vision 输出是概率性视觉观察，不等于经过仪器校准、人工确认或知识库支持的工程事实；低质量、遮挡、反光和小字图片仍可能产生漏读或误读。
+- 本地 OCR 依赖操作系统中的 Tesseract 可执行文件和语言数据。OCR 置信度是引擎提供的识别信号，不是内容真实性或工程结论正确率。
+- 当前请求把图片作为 Base64 放入 JSON，虽然便于教学和 Schema 校验，但会增加请求体体积；生产系统通常需要受控对象存储、短期签名引用和独立上传流程。
+- 当前没有取得真实模型 Token usage，成本只能标记为无法估算，不能把空成本当作零成本。
 - `execution.state="completed"` 只表示 Agent 编排流程和诊断草稿完成，不表示任何现场检查、维修、复位、测试或设备控制已经执行。
 - 当前 Agent 接口使用普通 JSON 响应并等待本次循环结束，没有提供流式进度、任务恢复或独立轨迹查询接口。
 - Prompt 是软约束，模型输出仍需经过 Schema、代码规则和人工审核。
@@ -1399,8 +1572,12 @@ analysys-AI-app/
 - 当前已有受控后端 Agent，但没有正式前端、身份认证、多用户隔离或生产部署配置。
 - SSE 只用于 Week 1 故障分诊，知识库查询当前使用普通 JSON 响应。
 
-## 19. 进一步阅读
+## 20. 进一步阅读
 
+- [Week 5 工程总结](docs/工程总结_week5.md)
+- [多模态 Agent 可靠性评测](docs/multimodal-evaluation.md)
+- [多模态工具选择对照实验](docs/multimodal-tool-selection.md)
+- [多模态场景与字段说明](docs/multimodal-scenarios.md)
 - [Week 3 可复现基线](docs/reproducibility.md)
 - [Robot Diagnostic Agent 架构](docs/agent-architecture.md)
 - [Robot Diagnostic Agent 失败案例与恢复策略](docs/agent-failure-cases.md)

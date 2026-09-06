@@ -15,6 +15,10 @@ from app.agent.tools.current_time import (
     SystemUtcClock,
     UtcClock,
 )
+from app.agent.tools.analyze_robot_image import (
+    ANALYZE_ROBOT_IMAGE_TOOL_DEFINITION,
+    AnalyzeRobotImageToolHandler,
+)
 from app.agent.tools.draft_test_case import (
     DRAFT_TEST_CASE_TOOL_DEFINITION,
     DraftTestCaseToolHandler,
@@ -35,6 +39,8 @@ from app.agent.tools.search_knowledge import (
 # 其他模块可以从app.agent.tools统一导入，
 # 不需要了解每个工具分别位于哪个子模块。
 __all__ = [
+    "ANALYZE_ROBOT_IMAGE_TOOL_DEFINITION",
+    "AnalyzeRobotImageToolHandler",
     "GET_CURRENT_TIME_TOOL_DEFINITION",
     "GetCurrentTimeToolHandler",
     "SystemUtcClock",

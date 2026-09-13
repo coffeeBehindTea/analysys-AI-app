@@ -13,6 +13,8 @@
 也不重新实现Embedding、关键词检索、RRF或查询改写。
 """
 
+import logging
+
 from inspect import (
     iscoroutinefunction,
 )
@@ -52,6 +54,13 @@ from app.services.hybrid_retrieval_gate import (
 from app.services.retrieval_scope import (
     RetrievalScopeFilter,
 )
+
+
+# 模块级Logger只记录固定事件名和门控产生的数值摘要。
+#
+# 不记录原始query、用户日志、Chunk正文或模型输出，
+# 避免为了排障破坏诊断链已经建立的脱敏边界。
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeRetrievalProvider(
@@ -241,6 +250,44 @@ class SearchKnowledgeToolHandler:
                     "门控拒绝结果不能包含"
                     "supporting_chunk_ids"
                 )
+
+            # 记录门控已经生成的安全诊断元数据。
+            #
+            # 这些字段可以区分：
+            #
+            # 1. 完全没有候选；
+            # 2. 找到了候选但相似度不足；
+            # 3. 有关键词或向量候选，但缺少双路支持；
+            # 4. 查询带有错误码，但候选中没有精确错误码支持。
+            #
+            # 日志不包含tool_input.query，防止把用户原始任务
+            # 或脱敏前处理不完整的日志内容写入服务端日志。
+            # 单次门控拒绝在检索层本身是合法业务结果，
+            # 但在Agent中会被计入连续工具失败并可能终止整次任务。
+            # 使用WARNING确保Uvicorn默认日志配置能够显示这一
+            # 需要运维关注、但不会转换成HTTP 5xx的事件。
+            logger.warning(
+                (
+                    "agent_search_knowledge_gate_rejected "
+                    "reason=%s policy_version=%s "
+                    "candidate_count=%d "
+                    "identifier_candidate_count=%d "
+                    "model_lexical_candidate_count=%d "
+                    "dual_path_candidate_count=%d "
+                    "top_rrf_score=%s "
+                    "top_vector_similarity=%s "
+                    "max_vector_similarity=%s"
+                ),
+                decision.reason,
+                decision.policy_version,
+                decision.evaluated_candidate_count,
+                decision.identifier_candidate_count,
+                decision.model_lexical_candidate_count,
+                decision.dual_path_candidate_count,
+                decision.top_rrf_score,
+                decision.top_vector_similarity,
+                decision.max_vector_similarity,
+            )
 
             return None
 

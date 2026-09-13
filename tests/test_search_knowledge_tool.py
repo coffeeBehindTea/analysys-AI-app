@@ -7,6 +7,8 @@ Chroma、生成式LLM或真实HTTP接口，也不会产生外部API费用。
 真实Chunk，不得在Agent工具内部再次调用知识回答LLM。
 """
 
+import logging
+
 from typing import (
     Any,
 )
@@ -518,6 +520,74 @@ async def test_handler_maps_gate_rejection_to_none(
 
     assert result is None
     assert len(provider.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_gate_rejection_logs_only_safe_decision_metadata(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """门控拒绝日志应可定位原因但不能泄露原始查询。
+
+    被测试模块是SearchKnowledgeToolHandler.__call__()的
+    decision.accepted=False分支。
+
+    Fake Provider返回候选存在但组合支持不足的门控决定。
+    Handler预期返回None，同时输出门控原因和候选计数；
+    故意放入查询中的敏感标记不能出现在日志中。
+    """
+
+    handler, _ = make_handler_and_provider(
+        result=make_rejected_result()
+    )
+
+    private_query_marker = (
+        "PRIVATE-QUERY-MUST-NOT-BE-LOGGED"
+    )
+
+    caplog.set_level(
+        logging.WARNING,
+        logger=(
+            "app.agent.tools.search_knowledge"
+        ),
+    )
+
+    result = await handler(
+        SearchKnowledgeToolInput(
+            query=private_query_marker,
+        )
+    )
+
+    assert result is None
+
+    log_text = caplog.text
+
+    assert (
+        "agent_search_knowledge_gate_rejected"
+        in log_text
+    )
+    assert (
+        "reason=insufficient_combined_support"
+        in log_text
+    )
+    assert "candidate_count=1" in log_text
+
+    matching_records = [
+        record
+        for record in caplog.records
+        if (
+            "agent_search_knowledge_gate_rejected"
+            in record.getMessage()
+        )
+    ]
+
+    assert len(matching_records) == 1
+    assert (
+        matching_records[0].levelno
+        == logging.WARNING
+    )
+
+    # 可观测性不能以泄露原始查询为代价。
+    assert private_query_marker not in log_text
 
 
 @pytest.mark.asyncio

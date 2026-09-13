@@ -24,6 +24,7 @@ from datetime import (
 from functools import (
     lru_cache,
 )
+from pathlib import Path
 
 from app.config import Settings, get_settings
 from app.services.llm_client import create_llm_client, get_llm_model
@@ -77,6 +78,12 @@ from app.agent.vision_input_store import (
 from app.agent.openai_planner import (
     OpenAICompatibleAgentPlanner,
 )
+from app.agent.request_safety_classifier import (
+    AgentRequestSafetyClassifier,
+)
+from app.agent.request_tool_policy import (
+    AgentToolPolicy,
+)
 
 # AgentRunner负责规划、工具执行和观察的受控循环。
 from app.agent.runner import (
@@ -121,6 +128,12 @@ from app.services.diagnosis_service import (
 # 工具观察、证据白名单和公开响应组合起来。
 from app.services.agent_diagnosis_service import (
     AgentDiagnosisService,
+)
+from app.services.diagnostic_session_builder import (
+    DiagnosticSessionBuilder,
+)
+from app.services.diagnostic_session_store import (
+    DiagnosticSessionStore,
 )
 from app.services.gated_hybrid_retrieval import (
     GatedHybridRetriever,
@@ -967,6 +980,52 @@ def get_agent_runner(
     )
 
 
+def get_diagnostic_session_builder(
+) -> DiagnosticSessionBuilder:
+    """创建无跨请求可变状态的诊断会话构造器。
+
+    Builder只读取一次请求及其公开响应，
+    所以每次依赖调用创建新实例即可。
+    """
+
+    return DiagnosticSessionBuilder()
+
+
+@lru_cache(maxsize=4)
+def _get_cached_diagnostic_session_store(
+    root_directory: Path,
+    /,
+) -> DiagnosticSessionStore:
+    """按照规范化目录缓存进程级会话Store。
+
+    缓存保证不同HTTP请求复用同一个asyncio.Lock，
+    避免每个请求各建一把互不相关的进程内锁。
+    """
+
+    return DiagnosticSessionStore(
+        root_directory=root_directory
+    )
+
+
+def get_diagnostic_session_store(
+    settings: Annotated[
+        Settings,
+        Depends(get_settings),
+    ],
+) -> DiagnosticSessionStore:
+    """取得当前配置目录对应的进程级会话Store。"""
+
+    normalized_directory = (
+        settings
+        .diagnostic_session_directory
+        .resolve(strict=False)
+    )
+
+    return _get_cached_diagnostic_session_store(
+        normalized_directory
+    )
+
+
 def get_agent_diagnosis_service(
     # Runner执行Planner与工具之间的受控循环。
     #
@@ -1015,6 +1074,19 @@ def get_agent_diagnosis_service(
         RequestVisionInputStore,
         Depends(get_request_vision_input_store),
     ],
+
+    # Builder把公开响应转换成不含完整日志、图片和
+    # Planner原始内容的DiagnosticSessionRecord。
+    session_builder: Annotated[
+        DiagnosticSessionBuilder,
+        Depends(get_diagnostic_session_builder),
+    ],
+
+    # Store由进程级依赖复用，负责异步写入本地JSON。
+    session_store: Annotated[
+        DiagnosticSessionStore,
+        Depends(get_diagnostic_session_store),
+    ],
 ) -> AgentDiagnosisService:
     """装配当前请求使用的Robot Diagnostic Agent Service。
 
@@ -1035,6 +1107,16 @@ def get_agent_diagnosis_service(
         vision_input_store=(
             vision_input_store
         ),
+
+        # 两个策略对象都只包含确定性Python规则，
+        # 不持有网络客户端或跨请求可变状态。
+        # Service先执行安全分类，再计算最小工具集合。
+        safety_classifier=(
+            AgentRequestSafetyClassifier()
+        ),
+        tool_policy=AgentToolPolicy(),
+        session_builder=session_builder,
+        session_store=session_store,
 
         # prompt_version是Planner提供的只读@property。
         #

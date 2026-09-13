@@ -4,6 +4,10 @@
 构造ToolExecutor。所有外部知识库能力均使用Fake替代。
 """
 
+from pathlib import (
+    Path,
+)
+
 from unittest.mock import (
     MagicMock,
 )
@@ -66,6 +70,12 @@ from app.schemas.agent import (
 )
 from app.services.agent_diagnosis_service import (
     AgentDiagnosisService,
+)
+from app.services.diagnostic_session_builder import (
+    DiagnosticSessionBuilder,
+)
+from app.services.diagnostic_session_store import (
+    DiagnosticSessionStore,
 )
 from app.services.gated_hybrid_retrieval import (
     GatedHybridRetrievalResult,
@@ -781,8 +791,9 @@ def test_agent_runner_dependency_connects_real_planner_and_executor(
 
 
 def test_agent_diagnosis_service_dependency_connects_request_components(
+    tmp_path: Path,
 ) -> None:
-    """Service依赖应复用当前Runner、证据Store和图片Store。"""
+    """Service依赖应复用请求组件与会话持久化组件。"""
 
     # 显式创建请求级Store。
     #
@@ -827,12 +838,21 @@ def test_agent_diagnosis_service_dependency_connects_request_components(
         executor,
     )
 
+    # Builder负责把公开Agent响应转换成脱敏会话记录。
+    # Store使用pytest提供的临时目录，避免测试污染真实会话目录。
+    session_builder = DiagnosticSessionBuilder()
+    session_store = DiagnosticSessionStore(
+        root_directory=tmp_path,
+    )
+
     service = get_agent_diagnosis_service(
         runner,
         planner,
         evidence_store,
         vision_input_adapter,
         vision_input_store,
+        session_builder,
+        session_store,
     )
 
     assert isinstance(
@@ -858,6 +878,14 @@ def test_agent_diagnosis_service_dependency_connects_request_components(
         service,
         "_vision_input_store",
     ) is vision_input_store
+    assert getattr(
+        service,
+        "_session_builder",
+    ) is session_builder
+    assert getattr(
+        service,
+        "_session_store",
+    ) is session_store
     assert getattr(
         service,
         "_planner_prompt_version",

@@ -14,6 +14,10 @@ from starlette import status
 
 from app.errors import (
     ApplicationError,
+    DiagnosticSessionAlreadyExistsError,
+    DiagnosticSessionCorruptedError,
+    DiagnosticSessionNotFoundError,
+    DiagnosticSessionStoreError,
     DocumentNotFoundError,
     DocumentValidationError,
     DuplicateDocumentError,
@@ -129,6 +133,40 @@ ERROR_METADATA: dict[type[ApplicationError], ErrorMetadata] = {
         status.HTTP_503_SERVICE_UNAVAILABLE,
         "vector_store_error",
         "知识库暂时不可用",
+    ),
+
+    # ---------- 诊断会话存储错误 ----------
+
+    # 普通磁盘读写失败表示服务当前无法可靠保存或读取
+    # 会话记录，因此使用503，而不是返回不带轨迹的假成功。
+    DiagnosticSessionStoreError: (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "diagnostic_session_store_error",
+        "诊断会话存储暂时不可用",
+    ),
+
+    # UUID4理论上极难碰撞；若真的存在相同记录，
+    # 明确返回409，且绝不覆盖原审计记录。
+    DiagnosticSessionAlreadyExistsError: (
+        status.HTTP_409_CONFLICT,
+        "diagnostic_session_already_exists",
+        "诊断会话标识发生冲突",
+    ),
+
+    # 文件存在但无法通过Schema或ID一致性校验，
+    # 属于服务器持久化数据完整性问题。
+    DiagnosticSessionCorruptedError: (
+        status.HTTP_500_INTERNAL_SERVER_ERROR,
+        "diagnostic_session_corrupted",
+        "诊断会话记录无法读取",
+    ),
+
+    # session_id格式合法，但存储中没有对应记录。
+    # 404与非法UUID产生的422含义不同。
+    DiagnosticSessionNotFoundError: (
+        status.HTTP_404_NOT_FOUND,
+        "diagnostic_session_not_found",
+        "诊断会话不存在",
     ),
 }
 

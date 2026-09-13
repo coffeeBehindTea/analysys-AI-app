@@ -2,17 +2,17 @@
 
 一个面向机器人研发场景的工程文档 RAG、证据约束结构化诊断、受控工具调用与多模态现场图片分析服务。
 
-项目支持摄取公开或脱敏的 PDF、Markdown 和 TXT 文档，将文档切分、向量化并持久化到 ChromaDB；用户可以通过自然语言查询知识库，获得只基于检索证据生成的回答和可定位到原始文件、页码或章节的引用。Week 3 在此基础上增加确定性查询归一化、关键词与向量混合检索、RRF 融合、头部保留重排、组合证据门控和结构化诊断 API。Week 4 进一步增加受控 Robot Diagnostic Agent，使模型只能通过注册表中的只读工具完成多步诊断任务。Week 5 将现场图片安全地接入同一个 Agent，增加图片输入适配、Vision Provider、本地 OCR 与规则解析对照、`analyze_robot_image` 工具、视觉来源标记和 30 场景多模态可靠性评测。
+项目支持摄取公开或脱敏的 PDF、Markdown 和 TXT 文档，将文档切分、向量化并持久化到 ChromaDB；用户可以通过自然语言查询知识库，获得只基于检索证据生成的回答和可定位到原始文件、页码或章节的引用。Week 3 在此基础上增加确定性查询归一化、关键词与向量混合检索、RRF 融合、头部保留重排、组合证据门控和结构化诊断 API。Week 4 进一步增加受控 Robot Diagnostic Agent，使模型只能通过注册表中的只读工具完成多步诊断任务。Week 5 将现场图片安全地接入同一个 Agent。Week 6 增加请求级工具策略、确定性安全分类、证据驱动进度状态、30 场景离线回归、脱敏诊断会话、轻量控制台和 Docker 可复现运行。
 
 项目同时保留 Week 1 的普通故障分诊与 SSE 接口、Week 2 的文档管理和知识库问答，以及 Week 3 的固定结构化诊断链路，用于比较普通 LLM、RAG 问答、证据约束诊断、文本 Agent 和多模态 Agent 之间的职责差异。
 
 > 本项目是 AI 应用工程学习项目，不是生产级机器人控制或安全认证系统。所有诊断、维修和安全操作仍需由具备资质的人员依据设备原厂资料确认。
 
-> 当前开发阶段：Week 5 任务 1～6 已完成。Agent 使用 `agent-tool-calling-v6` Planner Prompt、`robot-vision-observation-v2` Vision Prompt、白名单工具注册表、最大 5 个工具步骤、30 秒 Planner 超时、连续 2 次工具失败中止和 `agent-confirmed-evidence-v1` 最终证据约束。图片先经过本地格式与资源上限校验，再以原生多模态 message content 进入 Vision Provider；完整图片不会写入公开响应和评测轨迹。
+> 当前开发阶段：Week 6 任务 1～6 已完成。Agent 在 Planner 之前执行确定性安全分类和请求级最小工具策略，在每次工具结果之后由 `AgentProgressReducer` 更新已完成能力、证据覆盖、缺失信息和下一步工具范围。图片先经过本地格式与资源上限校验，再以原生多模态 message content 进入 Vision Provider；完整图片不会写入公开响应、会话记录和评测轨迹。
 >
-> Week 5 最终 30 场景评测达到：请求成功率 `1.000`、图片观察字段准确性 `0.829`、工具选择正确率 `0.600`、Vision 工具选择正确率 `0.933`、任务完成率 `0.500`、引用正确率 `0.812`、引用覆盖率 `0.619`、来源标注正确率 `0.700`、安全拒答率 `1.000`，严格场景总通过率为 `0.233`。这些指标表明安全拒答和 Vision 调用判断较稳定，但 Planner 的最小工具集合、终止语义和完整任务完成仍有明显改进空间，不能将本项目视为生产就绪系统。
+> Week 6 固定 Fixture 离线回归达到：严格通过 `26/30`、严格通过率 `0.867`、工具选择正确率 `0.867`、任务完成率 `0.875`、引用正确率 `1.000`、引用覆盖率 `0.952`、图片观察字段准确性 `0.886`、来源标注正确率 `0.867`、安全拒答率 `1.000`。该结果超过 `24/30` 门槛且没有安全回退，但它验证的是确定性框架，不代表真实 LLM 或 Vision 的线上准确率。
 >
-> 当前完整离线回归为 `2214 passed`。Week 5 的主要交付与验收依据见 [多模态工具选择对照实验](docs/multimodal-tool-selection.md)、[多模态场景与字段说明](docs/multimodal-scenarios.md) 和 [多模态 Agent 可靠性评测](docs/multimodal-evaluation.md)；Week 4 及更早阶段的架构与评测资料继续保留在 `docs/` 中。
+> 当前完整 Python 回归为 `2514 passed`。Week 6 的实现、测试口径、Docker 验证和限制见 [Week 6 工程总结](docs/工程总结_week6.md) 与 [多模态 Agent 离线回归](docs/multimodal-offline-regression.md)；历史架构与评测资料继续保留在 `docs/` 中。
 
 ## 1. 核心能力
 
@@ -58,6 +58,15 @@
 - 每次运行都有最大步骤、Planner 超时、工具超时、重复调用、连续失败和权限违规边界。
 - 最终诊断继续沿用 `DiagnosisReport` 和请求级证据白名单，模型不能伪造 Chunk 元数据。
 - 响应包含脱敏工具轨迹、视觉观察、模拟遥测观察、测试草案、终止原因和缺失信息，不暴露完整图片、完整工具参数、完整日志或模型私有思维链。
+
+### Agent 可靠性与可观测性
+
+- `AgentRequestSafetyClassifier` 在 Planner 之前确定性识别高风险控制、绕过安全保护和执行不可信图片指令等意图。
+- `AgentToolPolicy` 根据请求真正需要的能力计算最小 `allowed_tool_names`，不向普通请求默认暴露全部工具。
+- `AgentProgressReducer` 记录已完成能力、工具结果、已确认来源、证据覆盖、冲突、缺失信息和下一步允许工具，并阻止越权或重复调用。
+- 30 条场景使用 Fake Planner、Fake Vision 和固定 Fixture 执行确定性离线回归，区分框架稳定性与真实模型概率性表现。
+- 每次诊断都生成脱敏会话记录；可以查询最近会话或按 `session_id` 查看工具轨迹、终止原因、视觉观察、引用和运行指标。
+- `/console/` 提供轻量演示页面；Docker Compose 提供应用、健康检查、ChromaDB 和会话目录绑定挂载的一键本地启动方式。
 
 ### Vision、OCR 与视觉证据边界
 
@@ -155,6 +164,9 @@ flowchart TD
     Middleware["RequestIdMiddleware<br/>生成请求追踪 ID"]
     AgentRouter["Agent Router<br/>校验 HTTP 请求"]
     Service["AgentDiagnosisService<br/>编排请求并构造公开响应"]
+    Safety["RequestSafetyClassifier<br/>确定性识别高风险意图"]
+    Policy["AgentToolPolicy<br/>计算请求级最小工具范围"]
+    Progress["AgentProgressReducer<br/>跟踪能力、证据与下一步"]
     VisionAdapter["VisionInputAdapter<br/>解码并校验格式与资源上限"]
     VisionStore["RequestVisionInputStore<br/>保存当前请求验证后的图片"]
     Runner["AgentRunner<br/>控制循环与终止边界"]
@@ -169,11 +181,15 @@ flowchart TD
     Clock["get_current_time<br/>服务器 UTC 时间"]
     Evidence["ConfirmedEvidenceStore<br/>当前请求的真实证据白名单"]
     Builder["Report Builder<br/>校验最终草稿和引用"]
+    SessionBuilder["DiagnosticSessionBuilder<br/>构造脱敏会话记录"]
+    SessionStore["DiagnosticSessionStore<br/>持久化并查询会话"]
     Response["AgentDiagnosisResponse<br/>诊断、轨迹、视觉观察、遥测和草案"]
 
-    Client --> Middleware --> AgentRouter --> Service --> Runner
+    Client --> Middleware --> AgentRouter --> Service --> Safety --> Policy --> Runner
     Image --> Client
     Service --> VisionAdapter --> VisionStore
+    Runner --> Progress
+    Progress --> Runner
     Runner --> Planner
     Planner --> Runner
     Runner --> Executor --> Registry
@@ -190,6 +206,7 @@ flowchart TD
     Service --> Builder
     Evidence --> Builder
     Builder --> Response --> AgentRouter
+    Response --> SessionBuilder --> SessionStore
 ```
 
 一次正常多步调用链如下：
@@ -199,13 +216,18 @@ HTTP请求
 → RequestIdMiddleware：生成并传播request_id
 → Agent Router：校验AgentDiagnosisRequest并注入Service
 → AgentDiagnosisService：把用户字段序列化为不可信任务数据；图片先交给VisionInputAdapter校验并登记到请求级Store
+→ AgentRequestSafetyClassifier：在Planner之前识别高风险控制、绕过安全保护和执行不可信内容等意图
+→ AgentToolPolicy：计算required_capabilities和本次请求最小allowed_tool_names
+→ AgentProgressReducer：根据策略创建初始进度，记录尚未完成的能力和首轮允许工具
 → AgentRunner：请求Planner决定下一步
 → OpenAICompatibleAgentPlanner：返回结构化call_tool或finish决定
 → ToolExecutor：只从ToolRegistry查找工具，并校验输入、权限、超时和输出
 → analyze_robot_image（需要图片时）：按image_ref读取当前请求图片并调用Vision Provider，返回带来源标记的VisionObservation
 → 其他注册工具：返回经过Pydantic校验的知识证据、模拟遥测、草案或服务器时间
+→ AgentProgressReducer：合并工具结果、来源和证据，阻止越权或重复工具并收窄下一步范围
 → AgentRunner：记录观察并再次规划，直到正常完成或安全中止
 → AgentDiagnosisService：生成脱敏轨迹，校验最终草稿、视觉观察对应关系和请求级证据白名单
+→ DiagnosticSessionBuilder和DiagnosticSessionStore：构造并持久化脱敏会话记录
 → AgentDiagnosisResponse：返回结构化诊断、执行摘要、视觉观察、模拟遥测和测试草案
 ```
 
@@ -267,16 +289,16 @@ LLM、Embedding 和 Vision 可以使用不同的服务商、密钥、Base URL �
 
 自动化测试通过 Fake、Mock、依赖覆盖和临时 Chroma 目录运行，不需要真实 API Key，也不应访问外部网络。
 
-当前离线回归覆盖 Week 1～4 全部功能和 Week 5 任务 1～6 的多模态功能，共 `2214` 项：
+当前离线回归覆盖 Week 1～5 的全部既有功能和 Week 6 的工具策略、安全分类、进度状态、离线回归、会话、控制台与容器装配，共 `2514` 项：
 
 ```text
-tests    : 2214
+tests    : 2514
 failures : 0
 errors   : 0
 skipped  : 0
 ```
 
-这组结果来自完成 Week 5 修改后的完整本地回归，不是根据测试文件数量推算。自动化测试使用 Fake Provider、Mock HTTP、FastAPI 依赖覆盖和临时目录，不需要真实 API Key，也不应访问外部网络。
+这组结果来自完成 Week 6 修改后的完整本地回归，不是根据测试文件数量推算。自动化测试使用 Fake Provider、固定 Fixture、Mock HTTP、FastAPI 依赖覆盖和临时目录，不需要真实 API Key，也不应访问外部网络。
 
 ## 5. 创建环境并安装依赖
 
@@ -624,6 +646,106 @@ X-Request-ID
 ```
 
 该 ID 可用于关联客户端错误响应和服务端日志。
+
+### 使用 Docker Compose 启动
+
+Docker 启动适合演示和干净环境复现。它把 Python 3.11、项目依赖、
+Tesseract OCR、英文语言包和简体中文语言包一起封装进镜像，
+不依赖宿主机当前激活的 Conda 环境。
+
+启动前需要满足以下条件：
+
+- Docker Desktop 已经启动，并显示 Engine running；
+- 当前目录是包含 `Dockerfile`、`compose.yaml` 和 `.env` 的项目根目录；
+- `.env` 已配置本次运行所需的 LLM、Embedding、Vision 和 Chroma 参数；
+- 宿主机的 `8000` 端口没有被其他进程占用。
+
+先校验 Compose 配置：
+
+```powershell
+docker compose config --quiet
+```
+
+预期结果是命令正常结束且不输出错误。该命令只解析和校验配置，
+不会创建镜像或启动容器。
+
+使用一条命令构建镜像并在后台启动服务：
+
+```powershell
+docker compose up --detach --build
+```
+
+其中，`--build` 要求 Compose 根据 `Dockerfile` 构建或更新镜像；
+`--detach` 表示容器在后台运行。首次构建需要下载 Python 基础镜像和项目依赖，
+因此耗时会明显长于后续启动。
+
+检查容器状态：
+
+```powershell
+docker compose ps
+```
+
+预期结果是 `robotops-copilot` 服务为 `Up`，完成健康检查后显示 `healthy`，
+并显示 `0.0.0.0:8000->8000/tcp` 端口映射。
+
+检查 HTTP 健康接口：
+
+```powershell
+curl.exe -i "http://127.0.0.1:8000/health"
+```
+
+预期结果是 `HTTP/1.1 200 OK`，响应正文为：
+
+```json
+{"status":"ok"}
+```
+
+打开轻量控制台：
+
+- [http://127.0.0.1:8000/console/](http://127.0.0.1:8000/console/)
+
+控制台支持填写机器人编号、故障现象、脱敏日志和可选图片，
+并展示结构化诊断、来源分层、引用、视觉观察、工具轨迹和终止原因。
+本 README 后面的“运行 Robot Diagnostic Agent”提供纯文本请求和 Base64 图片请求示例，
+可直接用于容器化服务的端到端验证。
+
+下面的截图来自本地 Docker Compose 环境，展示了健康可用的控制台和
+绑定挂载中已经持久化的最近诊断会话：
+
+![RobotOps Copilot Docker 本地演示](docs/robotops-copilot-docker-demo.png)
+
+查看容器日志：
+
+```powershell
+docker compose logs --follow --tail 100
+```
+
+`--follow` 会持续显示新日志；按 `Ctrl+C` 只退出日志查看，不会停止容器。
+日志预期包含 Uvicorn 启动信息和 HTTP 请求记录，但不应包含 API Key、
+完整图片 Base64、完整敏感日志或模型私有思维链。
+
+本项目使用两个绑定挂载保存运行数据：
+
+| 宿主机目录 | 容器目录 | 用途 |
+|---|---|---|
+| `./chroma_data` | `/app/chroma_data` | 保存 Chroma Collection、向量和 Chunk 元数据 |
+| `./data/diagnostic_sessions` | `/app/data/diagnostic_sessions` | 保存脱敏诊断会话与运行轨迹 |
+
+绑定挂载意味着数据实际保存在项目目录中。重新创建容器后，
+只要没有删除这两个宿主机目录，知识库和诊断会话仍然存在。
+`.env` 通过 Compose 的 `env_file` 在运行时注入容器；
+它已被 `.dockerignore` 排除，不会被 `COPY` 进镜像。
+
+停止并删除本项目容器与 Compose 网络：
+
+```powershell
+docker compose down
+```
+
+该命令不会删除上述绑定挂载中的 Chroma 和诊断会话数据，
+也不会删除已经构建的 `robotops-copilot:week6` 镜像。
+再次启动时执行 `docker compose up --detach` 即可；
+只有 Dockerfile 或依赖发生变化时才需要再次添加 `--build`。
 
 ## 10. API 接口
 
@@ -1330,20 +1452,20 @@ python -m scripts.evaluate_multimodal `
 运行全部测试并生成最终机器可读报告。`pytest.ini` 会自动把测试临时目录固定到项目内的 `.pytest_tmp`：
 
 ```powershell
-# 运行Week 1至Week 5的全部离线测试。
+# 运行Week 1至Week 6的全部离线测试。
 python -m pytest
 ```
 
-当前源码在完成 Week 5 全部任务后的最终完整回归结果为 `2214 passed`：
+当前源码在完成 Week 6 全部任务后的最终完整回归结果为 `2514 passed`：
 
 ```text
-tests    : 2214
+tests    : 2514
 failures : 0
 errors   : 0
 skipped  : 0
 ```
 
-上述数字来自完成 Week 5 修改后的完整本地回归，不是从 `.pytest_cache` 或测试文件数量推算得到。回归同时覆盖 Week 1 至 Week 4 的旧功能与 Week 5 的图片校验、Vision、OCR、视觉工具、多模态 API、场景执行、确定性评分、辅助 Judge、报告生成和轨迹脱敏能力。
+上述数字来自完成 Week 6 修改后的完整本地回归，不是从 `.pytest_cache` 或测试文件数量推算得到。回归同时覆盖 Week 1 至 Week 5 的既有功能，以及 Week 6 的请求级工具策略、安全分类、进度状态、30 场景离线回归、会话持久化、查询 API、Web 控制台和 Docker 依赖装配。
 
 核心测试使用：
 
@@ -1399,6 +1521,11 @@ skipped  : 0
 - `analyze_robot_image` 的请求级图片引用、只读权限、提示注入边界、空观察与高风险内容处理；
 - 多模态 Agent 的视觉观察、知识证据、用户日志和模拟遥测来源分层；
 - 30 条场景的图片预检、批量执行、确定性评分、辅助 Judge、延迟分位数、成本覆盖率和脱敏轨迹生成。
+- 请求级最小工具策略、确定性安全分类及其否定表达和高风险边界。
+- `AgentProgress` 的能力完成、工具记录、证据覆盖、冲突、缺失信息和下一步工具范围。
+- 30 条场景 Fixture 的加载、Gold 配对、Fake 执行、消费审计、严格评分和安全回退门槛。
+- 脱敏诊断会话的构造、原子存储、最近列表、按 ID 查询和不存在会话错误。
+- Web 控制台页面与静态资源挂载，以及 Docker 依赖装配和最终完整回归。
 
 ## 18. 项目结构
 
@@ -1418,7 +1545,10 @@ analysys-AI-app/
 │   │   ├── failure_policy.py
 │   │   ├── openai_planner.py
 │   │   ├── planner.py
+│   │   ├── progress_reducer.py
 │   │   ├── registry.py
+│   │   ├── request_safety_classifier.py
+│   │   ├── request_tool_policy.py
 │   │   ├── runner.py
 │   │   └── vision_input_store.py
 │   ├── middleware/
@@ -1426,6 +1556,7 @@ analysys-AI-app/
 │   ├── routers/
 │   │   ├── agent.py
 │   │   ├── diagnostics.py
+│   │   ├── diagnostic_sessions.py
 │   │   ├── health.py
 │   │   ├── knowledge.py
 │   │   └── triage.py
@@ -1435,13 +1566,18 @@ analysys-AI-app/
 │   │   ├── agent_diagnosis.py
 │   │   ├── agent_planning.py
 │   │   ├── agent_runtime.py
+│   │   ├── agent_progress.py
+│   │   ├── agent_tool_policy.py
 │   │   ├── agent_tools.py
+│   │   ├── diagnostic_session.py
 │   │   ├── diagnosis_llm.py
 │   │   ├── diagnostics.py
 │   │   ├── evaluation.py
 │   │   ├── knowledge.py
 │   │   ├── knowledge_query.py
 │   │   ├── multimodal_agent_evaluation.py
+│   │   ├── multimodal_offline_regression.py
+│   │   ├── multimodal_offline_regression_report.py
 │   │   ├── multimodal_tool_selection.py
 │   │   ├── multimodal_tool_selection_evaluation.py
 │   │   ├── ocr.py
@@ -1457,6 +1593,8 @@ analysys-AI-app/
 │   │   ├── diagnosis_prompts.py
 │   │   ├── diagnosis_report_builder.py
 │   │   ├── diagnosis_service.py
+│   │   ├── diagnostic_session_builder.py
+│   │   ├── diagnostic_session_store.py
 │   │   ├── document_catalog.py
 │   │   ├── document_loader.py
 │   │   ├── document_service.py
@@ -1470,6 +1608,9 @@ analysys-AI-app/
 │   │   ├── lexical_normalization.py
 │   │   ├── multimodal_tool_selection_executor.py
 │   │   ├── multimodal_tool_selection_experiment.py
+│   │   ├── multimodal_offline_fixture_loader.py
+│   │   ├── multimodal_offline_regression_service.py
+│   │   ├── multimodal_offline_scenario_executor.py
 │   │   ├── ocr_provider.py
 │   │   ├── ocr_rule_parser.py
 │   │   ├── query_rewriting.py
@@ -1480,6 +1621,10 @@ analysys-AI-app/
 │   │   ├── vision_input.py
 │   │   ├── vision_prompts.py
 │   │   └── vision_provider.py
+│   ├── web/
+│   │   ├── app.js
+│   │   ├── index.html
+│   │   └── styles.css
 │   ├── config.py
 │   ├── dependencies.py
 │   ├── errors.py
@@ -1488,6 +1633,7 @@ analysys-AI-app/
 │   ├── eval/
 │   │   ├── agent_scenarios.jsonl
 │   │   ├── gold_questions.jsonl
+│   │   ├── multimodal_offline_fixtures.jsonl
 │   │   ├── multimodal_scenarios.jsonl
 │   │   └── multimodal_tool_selection_cases.jsonl
 │   ├── multimodal/
@@ -1508,20 +1654,25 @@ analysys-AI-app/
 │   ├── agent-trace-samples.md
 │   ├── corpus-sources.md
 │   ├── architecture.md
+│   ├── diagnostic-session-sample.json
 │   ├── diagnosis-schema.md
 │   ├── multimodal-evaluation.md
 │   ├── multimodal-scenarios.md
 │   ├── multimodal-tool-selection.md
+│   ├── multimodal-offline-regression.md
 │   ├── multimodal-traces/
+│   ├── robotops-copilot-docker-demo.png
 │   ├── retrieval-strategy-comparison.md
 │   ├── test-report_week3.md
 │   ├── 工程复盘_week3.md
 │   ├── week4工程复盘.md
 │   ├── 工程总结_week4.md
 │   ├── 工程总结_week5.md
+│   ├── 工程总结_week6.md
 │   ├── reproducibility.md
 │   ├── pytest-results-week3-final.xml
-│   └── pytest-results-week4-final.xml
+│   ├── pytest-results-week4-final.xml
+│   └── pytest-results-week6-final.xml
 ├── scripts/
 │   ├── compare_diagnosis_prompts.py
 │   ├── compare_retrieval_strategies.py
@@ -1529,15 +1680,20 @@ analysys-AI-app/
 │   ├── evaluate_citations.py
 │   ├── evaluate_hybrid_gate.py
 │   ├── evaluate_multimodal.py
+│   ├── evaluate_multimodal_offline_regression.py
 │   ├── evaluate_multimodal_tool_selection.py
 │   ├── evaluate_retrieval_strategies.py
 │   ├── generate_multimodal_agent_scenarios.py
 │   ├── generate_multimodal_tool_selection_samples.py
+│   ├── build_multimodal_offline_fixtures.py
 │   ├── ingest_documents.py
 │   └── smoke_hybrid_retrieval.py
 ├── tests/
 ├── .env.example
+├── .dockerignore
 ├── .gitignore
+├── compose.yaml
+├── Dockerfile
 ├── main.py
 ├── README.md
 └── requirements.txt
@@ -1560,20 +1716,25 @@ analysys-AI-app/
 - 当前五个 Agent 工具全部只读，不包含机器人控制、任务下发、远程命令、数据修改或真实测试执行能力。
 - `draft_test_case` 使用确定性模板生成待人工批准草案，不是已经执行的测试，也不能替代设备原厂规程和现场风险评估。
 - Planner 依赖外部生成式 LLM。兼容服务可能一次建议多个工具；当前单步 ReAct 循环只选择第一个工具执行，再根据观察重新规划，因此服务端可能出现 `agent_planner_parallel_tool_calls_serialized` 警告。
-- 当前 30 场景多模态评测的严格总通过率为 `0.233`。安全拒答率为 `1.000`，但 Planner 在最小工具集合、停止时机、任务完成、来源标注和完整证据利用方面仍不稳定，因此当前结果不能视为生产就绪。
+- Week 6 固定 Fixture 离线回归的严格通过率为 `0.867`，安全拒答率为 `1.000`；四条失败场景仍涉及 Vision 工具范围、终止状态、来源标注或人工审核语义。离线结果只验证确定性框架，不能替代真实 Planner 和 Vision 抽样评测，也不能视为生产就绪证明。
 - Vision 输出是概率性视觉观察，不等于经过仪器校准、人工确认或知识库支持的工程事实；低质量、遮挡、反光和小字图片仍可能产生漏读或误读。
 - 本地 OCR 依赖操作系统中的 Tesseract 可执行文件和语言数据。OCR 置信度是引擎提供的识别信号，不是内容真实性或工程结论正确率。
 - 当前请求把图片作为 Base64 放入 JSON，虽然便于教学和 Schema 校验，但会增加请求体体积；生产系统通常需要受控对象存储、短期签名引用和独立上传流程。
 - 当前没有取得真实模型 Token usage，成本只能标记为无法估算，不能把空成本当作零成本。
 - `execution.state="completed"` 只表示 Agent 编排流程和诊断草稿完成，不表示任何现场检查、维修、复位、测试或设备控制已经执行。
-- 当前 Agent 接口使用普通 JSON 响应并等待本次循环结束，没有提供流式进度、任务恢复或独立轨迹查询接口。
+- 当前 Agent 接口使用普通 JSON 响应并等待本次循环结束；虽然已经提供脱敏会话与独立轨迹查询，但仍没有流式进度、断点恢复或后台任务队列。
 - Prompt 是软约束，模型输出仍需经过 Schema、代码规则和人工审核。
 - 安全关键操作不能只依赖 LLM 回答执行。
-- 当前已有受控后端 Agent，但没有正式前端、身份认证、多用户隔离或生产部署配置。
+- 当前轻量 Web 控制台和 Docker Compose 只用于本地教学演示；系统仍没有身份认证、多用户隔离、TLS、生产密钥管理、集中日志、备份和多实例部署能力。
 - SSE 只用于 Week 1 故障分诊，知识库查询当前使用普通 JSON 响应。
 
 ## 20. 进一步阅读
 
+- [Week 6 工程总结](docs/工程总结_week6.md)
+- [Week 6 多模态 Agent 离线回归](docs/multimodal-offline-regression.md)
+- [Week 6 最终 JUnit 回归报告](docs/pytest-results-week6-final.xml)
+- [脱敏诊断会话样例](docs/diagnostic-session-sample.json)
+- [RobotOps Copilot Docker 演示截图](docs/robotops-copilot-docker-demo.png)
 - [Week 5 工程总结](docs/工程总结_week5.md)
 - [多模态 Agent 可靠性评测](docs/multimodal-evaluation.md)
 - [多模态工具选择对照实验](docs/multimodal-tool-selection.md)

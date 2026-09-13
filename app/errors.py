@@ -90,3 +90,23 @@ class DocumentValidationError(ApplicationError):
 
 class DocumentNotFoundError(ApplicationError):
     """指定的知识库文档不存在。"""
+
+
+class DiagnosticSessionStoreError(ApplicationError):
+    """诊断会话存储暂时无法完成读写操作。"""
+
+
+class DiagnosticSessionAlreadyExistsError(
+    DiagnosticSessionStoreError
+):
+    """相同session_id的诊断会话已经存在。"""
+
+
+class DiagnosticSessionCorruptedError(
+    DiagnosticSessionStoreError
+):
+    """持久化诊断会话无法通过数据完整性校验。"""
+
+
+class DiagnosticSessionNotFoundError(ApplicationError):
+    """指定的诊断会话不存在。"""

@@ -1,0 +1,154 @@
+{
+  "schema_version": "diagnostic-session-v1",
+  "session_id": "be0c1749-29d3-4fd4-8206-689338fd2a93",
+  "request_id": "36c3da3f-fa95-4dda-aed0-1fc499b36cdd",
+  "created_at": "2026-09-09T06:06:34.908410Z",
+  "request_summary": {
+    "robot_id": "robot-001",
+    "symptom_summary": "网络恢复后机器人仍暂停",
+    "task_goal_summary": "读取面板状态并检索网络故障恢复规则，说明旧任务为什么不能自动继续",
+    "log_excerpt_sha256": "2b7960415757c922da733aa3390f9b628e0e14c1d0e3d22dc86f752e77225946",
+    "log_excerpt_char_count": 55,
+    "image_count": 1
+  },
+  "status": "failed",
+  "execution_state": "aborted",
+  "termination_reason": "tool_failure_limit_reached",
+  "finish_reason": null,
+  "diagnosis": {
+    "prompt_version": "agent-tool-calling-v6",
+    "gate_version": "agent-confirmed-evidence-v1",
+    "status": "abstained",
+    "evidence": [],
+    "possible_causes": [],
+    "next_checks": [],
+    "risk_level": "unknown",
+    "missing_information": [
+      "连续工具调用未能产生可用结果，需要补充输入或人工检查工具状态"
+    ],
+    "abstained": true
+  },
+  "tool_events": [
+    {
+      "step_id": 1,
+      "event_type": "tool_execution",
+      "tool_name": "analyze_robot_image",
+      "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
+      "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=5；indicator_count=3；requires_human_check=false",
+      "status": "success",
+      "duration_ms": 4502.322899999854,
+      "error_code": null
+    },
+    {
+      "step_id": 2,
+      "event_type": "tool_execution",
+      "tool_name": "search_knowledge",
+      "input_summary": "知识库检索；query_chars=38；top_k=3",
+      "result_summary": "status=empty；error_code=empty_result；message=工具没有返回可用结果",
+      "status": "empty",
+      "duration_ms": 238.24969999986934,
+      "error_code": "empty_result"
+    },
+    {
+      "step_id": 3,
+      "event_type": "tool_execution",
+      "tool_name": "search_knowledge",
+      "input_summary": "知识库检索；query_chars=28；top_k=3",
+      "result_summary": "status=empty；error_code=empty_result；message=工具没有返回可用结果",
+      "status": "empty",
+      "duration_ms": 208.61750000040047,
+      "error_code": "empty_result"
+    }
+  ],
+  "vision_observations": [
+    {
+      "step_id": 1,
+      "image_ref": "image_001",
+      "observation": {
+        "status": "completed",
+        "image_quality": "clear",
+        "observations": [
+          {
+            "description": "面板标题显示为 ROBOT STATUS PANEL",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板顶部中央"
+          },
+          {
+            "description": "故障码字段显示为 ERR-NET-4001",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板中间偏左"
+          },
+          {
+            "description": "网络状态字段显示为 CONNECTED",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板中间偏左"
+          },
+          {
+            "description": "任务状态字段显示为 PAUSED",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板下部偏左"
+          },
+          {
+            "description": "面板底部显示文字 SYNTHETIC TRAINING SAMPLE",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板左下角"
+          }
+        ],
+        "visible_indicators": [
+          {
+            "label": "FAULT CODE",
+            "observed_state": "ERR-NET-4001",
+            "confidence": "high",
+            "region": "面板中间偏左"
+          },
+          {
+            "label": "NETWORK",
+            "observed_state": "CONNECTED",
+            "confidence": "high",
+            "region": "面板中间偏左"
+          },
+          {
+            "label": "TASK",
+            "observed_state": "PAUSED",
+            "confidence": "high",
+            "region": "面板下部偏左"
+          }
+        ],
+        "uncertain_items": [],
+        "untrusted_text_detected": false,
+        "untrusted_text_notes": [],
+        "requires_human_check": false,
+        "human_check_reasons": [],
+        "source": "vision_model",
+        "source_image_sha256": "992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+        "prompt_version": "robot-vision-observation-v2",
+        "model_name": "deepseek-v4-flash-vision-exp"
+      }
+    }
+  ],
+  "telemetry_observations": [],
+  "test_case_drafts": [],
+  "evidence_coverage": {
+    "confirmed_source_ids": [
+      "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367"
+    ],
+    "covered_evidence_ids": [
+      "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367:call_00_IAP3kL9OizI52n4l8bzG9454"
+    ],
+    "cited_chunk_ids": []
+  },
+  "metrics": {
+    "total_duration_ms": 9586.027299999841,
+    "tool_step_count": 3,
+    "failed_tool_count": 0,
+    "failed_tool_names": [],
+    "confirmed_source_count": 1,
+    "covered_evidence_count": 1,
+    "citation_count": 0
+  }
+}

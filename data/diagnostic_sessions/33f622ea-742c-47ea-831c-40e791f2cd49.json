@@ -1,0 +1,63 @@
+{
+  "schema_version": "diagnostic-session-v1",
+  "session_id": "33f622ea-742c-47ea-831c-40e791f2cd49",
+  "request_id": "c988bb05-1ed3-464e-9705-f86b1545f270",
+  "created_at": "2026-09-09T05:59:02.709898Z",
+  "request_summary": {
+    "robot_id": "robot-demo-114",
+    "symptom_summary": "调度网络已经恢复，但机器人仍处于暂停状态，没有继续原任务",
+    "task_goal_summary": "检索知识库中的网络恢复规则，别读取遥测也不生成测试草案",
+    "log_excerpt_sha256": "a1f09f0e12ca4967af4fd95199dfceb0a5ad43b16b4c924c264ecce6305c1181",
+    "log_excerpt_char_count": 86,
+    "image_count": 0
+  },
+  "status": "abstained",
+  "execution_state": "completed",
+  "termination_reason": "planner_finished",
+  "finish_reason": "insufficient_information",
+  "diagnosis": {
+    "prompt_version": "agent-tool-calling-v6",
+    "gate_version": "agent-confirmed-evidence-v1",
+    "status": "abstained",
+    "evidence": [],
+    "possible_causes": [],
+    "next_checks": [],
+    "risk_level": "unknown",
+    "missing_information": [
+      "知识库检索未返回任何关于网络恢复后机器人继续原任务的规则证据",
+      "任务明确要求不读取遥测且不生成测试草案，无法通过其他来源补充证据",
+      "尚未取得任务所需的知识库证据",
+      "尚未取得任务所需的模拟遥测快照"
+    ],
+    "abstained": true
+  },
+  "tool_events": [
+    {
+      "step_id": 1,
+      "event_type": "tool_execution",
+      "tool_name": "search_knowledge",
+      "input_summary": "知识库检索；query_chars=26；top_k=5",
+      "result_summary": "status=empty；error_code=empty_result；message=工具没有返回可用结果",
+      "status": "empty",
+      "duration_ms": 311.981900002138,
+      "error_code": "empty_result"
+    }
+  ],
+  "vision_observations": [],
+  "telemetry_observations": [],
+  "test_case_drafts": [],
+  "evidence_coverage": {
+    "confirmed_source_ids": [],
+    "covered_evidence_ids": [],
+    "cited_chunk_ids": []
+  },
+  "metrics": {
+    "total_duration_ms": 5855.350100002397,
+    "tool_step_count": 1,
+    "failed_tool_count": 0,
+    "failed_tool_names": [],
+    "confirmed_source_count": 0,
+    "covered_evidence_count": 0,
+    "citation_count": 0
+  }
+}

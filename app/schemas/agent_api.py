@@ -21,6 +21,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    UUID4,
     field_validator,
     model_validator,
 )
@@ -32,6 +33,9 @@ from app.schemas.agent import (
 )
 from app.schemas.agent_planning import (
     AgentPlannerFinishReason,
+)
+from app.schemas.agent_progress import (
+    AgentProgress,
 )
 from app.schemas.agent_runtime import (
     AgentMissingInformation,
@@ -406,6 +410,14 @@ class AgentExecutionSummary(BaseModel):
         ),
     )
 
+    progress: AgentProgress | None = Field(
+        default=None,
+        description=(
+            "本次Runner启用证据驱动状态机时产生的"
+            "最终脱敏进度快照"
+        ),
+    )
+
     missing_information: list[
         AgentMissingInformation
     ] = Field(
@@ -447,6 +459,37 @@ class AgentExecutionSummary(BaseModel):
                 "step_count必须等于steps数量"
             )
 
+        if self.progress is not None:
+            if len(
+                self.progress.tool_records
+            ) != self.step_count:
+                raise ValueError(
+                    "progress工具记录数量必须等于"
+                    "step_count"
+                )
+
+            if (
+                self.state == "completed"
+                and self.progress.state
+                not in {
+                    "completed",
+                    "partial",
+                    "abstained",
+                    "human_review_required",
+                }
+            ):
+                raise ValueError(
+                    "正常结束摘要必须包含终态进度"
+                )
+
+            if (
+                self.state == "aborted"
+                and self.progress.state != "failed"
+            ):
+                raise ValueError(
+                    "中止摘要必须包含failed进度"
+                )
+
         actual_step_ids = [
             step.step_id
             for step in self.steps
@@ -468,11 +511,14 @@ class AgentExecutionSummary(BaseModel):
         if self.state == "completed":
             if (
                 self.termination_reason
-                != "planner_finished"
+                not in {
+                    "planner_finished",
+                    "request_policy_finished",
+                }
             ):
                 raise ValueError(
                     "completed执行必须由"
-                    "planner_finished结束"
+                    "Planner或请求策略正常结束"
                 )
 
             if self.finish_reason is None:
@@ -481,15 +527,43 @@ class AgentExecutionSummary(BaseModel):
                     "finish_reason"
                 )
 
+            # 请求策略只会提前拒答或转人工审核，
+            # 不可能在没有运行Planner和工具的情况下
+            # 声称诊断任务已经完成。
+            if (
+                self.termination_reason
+                == "request_policy_finished"
+            ):
+                if self.finish_reason == "task_completed":
+                    raise ValueError(
+                        "请求策略提前结束不能使用"
+                        "task_completed"
+                    )
+
+                if self.steps:
+                    raise ValueError(
+                        "请求策略提前结束不能包含"
+                        "工具执行步骤"
+                    )
+
             if (
                 self.finish_reason
                 == "task_completed"
                 and self.missing_information
             ):
-                raise ValueError(
-                    "task_completed不能同时包含"
-                    "missing_information"
-                )
+                # 兼容旧结果时，Planner声称完成仍不能同时
+                # 声明缺失信息。启用进度状态机后，如果Reducer
+                # 已将该声明修正为partial或abstained，则公开
+                # 摘要应展示真实缺口，而不是继续相信Planner。
+                if (
+                    self.progress is None
+                    or self.progress.state
+                    == "completed"
+                ):
+                    raise ValueError(
+                        "task_completed不能同时包含"
+                        "missing_information"
+                    )
 
             if (
                 self.finish_reason
@@ -588,6 +662,17 @@ class AgentDiagnosisResponse(BaseModel):
         max_length=200,
         description=(
             "用于关联响应头、日志和诊断报告的请求标识"
+        ),
+    )
+
+    # 真实HTTP诊断完成并成功持久化后，Service会填入该ID。
+    #
+    # 默认None用于兼容不启用会话存储的离线单元测试；
+    # 生产依赖会同时注入Builder和Store，因此真实接口应返回UUID4。
+    session_id: UUID4 | None = Field(
+        default=None,
+        description=(
+            "用于查询本次诊断会话、轨迹和引用详情的UUID4"
         ),
     )
 

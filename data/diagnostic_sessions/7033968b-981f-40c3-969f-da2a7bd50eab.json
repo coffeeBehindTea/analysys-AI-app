@@ -1,0 +1,134 @@
+{
+  "schema_version": "diagnostic-session-v1",
+  "session_id": "7033968b-981f-40c3-969f-da2a7bd50eab",
+  "request_id": "fae0487e-59a7-4860-a62a-e81cb1227c39",
+  "created_at": "2026-09-09T13:01:13.477167Z",
+  "request_summary": {
+    "robot_id": "robot-vision-demo",
+    "symptom_summary": "请读取图片中可见的故障码、网络状态和任务状态",
+    "task_goal_summary": "只根据图片读取可见状态，并区分视觉观察与工程结论",
+    "log_excerpt_sha256": "a13557b1c32567a811b1e19729478edc37990aa51fa32715f98d05c9137b8434",
+    "log_excerpt_char_count": 34,
+    "image_count": 1
+  },
+  "status": "abstained",
+  "execution_state": "completed",
+  "termination_reason": "planner_finished",
+  "finish_reason": "insufficient_information",
+  "diagnosis": {
+    "prompt_version": "agent-tool-calling-v6",
+    "gate_version": "agent-confirmed-evidence-v1",
+    "status": "abstained",
+    "evidence": [],
+    "possible_causes": [],
+    "next_checks": [],
+    "risk_level": "unknown",
+    "missing_information": [
+      "视觉观察显示故障码ERR-NET-4001、网络状态CONNECTED、任务状态PAUSED，但缺少知识库证据支持，无法形成工程结论"
+    ],
+    "abstained": true
+  },
+  "tool_events": [
+    {
+      "step_id": 1,
+      "event_type": "tool_execution",
+      "tool_name": "analyze_robot_image",
+      "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=21",
+      "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=5；indicator_count=3；requires_human_check=false",
+      "status": "success",
+      "duration_ms": 6648.5248909999655,
+      "error_code": null
+    }
+  ],
+  "vision_observations": [
+    {
+      "step_id": 1,
+      "image_ref": "image_001",
+      "observation": {
+        "status": "completed",
+        "image_quality": "clear",
+        "observations": [
+          {
+            "description": "图片中可见一个标题为'ROBOT STATUS PANEL'的深色面板。",
+            "category": "visible_condition",
+            "confidence": "high",
+            "region": "面板左上角"
+          },
+          {
+            "description": "图片中存在'FAULT CODE'标签及其值'ERR-NET-4001'。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板中部左侧标签及右侧数值"
+          },
+          {
+            "description": "图片中存在'NETWORK'标签及其值'CONNECTED'。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板中部中间行"
+          },
+          {
+            "description": "图片中存在'TASK'标签及其值'PAUSED'。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板中部底部行"
+          },
+          {
+            "description": "图片底部角落可见'SYNTHETIC TRAINING SAMPLE'字样。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板左下角"
+          }
+        ],
+        "visible_indicators": [
+          {
+            "label": "FAULT CODE",
+            "observed_state": "显示为 ERR-NET-4001",
+            "confidence": "high",
+            "region": "面板中部第一行"
+          },
+          {
+            "label": "NETWORK",
+            "observed_state": "显示为 CONNECTED",
+            "confidence": "high",
+            "region": "面板中部第二行"
+          },
+          {
+            "label": "TASK",
+            "observed_state": "显示为 PAUSED",
+            "confidence": "high",
+            "region": "面板中部第三行"
+          }
+        ],
+        "uncertain_items": [],
+        "untrusted_text_detected": false,
+        "untrusted_text_notes": [],
+        "requires_human_check": false,
+        "human_check_reasons": [],
+        "source": "vision_model",
+        "source_image_sha256": "992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+        "prompt_version": "robot-vision-observation-v2",
+        "model_name": "deepseek-v4-flash-vision-exp"
+      }
+    }
+  ],
+  "telemetry_observations": [],
+  "test_case_drafts": [],
+  "evidence_coverage": {
+    "confirmed_source_ids": [
+      "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367"
+    ],
+    "covered_evidence_ids": [
+      "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367:call_00_riAVdjqueunsDRKfD93R8472"
+    ],
+    "cited_chunk_ids": []
+  },
+  "metrics": {
+    "total_duration_ms": 9764.962868999988,
+    "tool_step_count": 1,
+    "failed_tool_count": 0,
+    "failed_tool_names": [],
+    "confirmed_source_count": 1,
+    "covered_evidence_count": 1,
+    "citation_count": 0
+  }
+}

@@ -526,39 +526,58 @@ class AgentEvaluationScenario(BaseModel):
                 "expected_finish_reasons"
             )
 
-        # planner_finished只能对应completed执行。
+        # completed现在有两种合法来源：
+        #
+        # 1. planner_finished：
+        #    Planner完成工具循环后主动结束；
+        # 2. request_policy_finished：
+        #    Week 6请求级安全或工具策略在进入Planner前
+        #    已经形成稳定拒答/人工审核结果。
+        #
+        # 两者都会产生合法的completed公开响应，
+        # 但只有planner_finished表示Planner真正运行过。
+        completed_termination_reasons = {
+            "planner_finished",
+            "request_policy_finished",
+        }
+
         if (
             completed_is_allowed
-            and "planner_finished"
-            not in self.expected_termination_reasons
+            and not completed_termination_reasons
+            .intersection(
+                self.expected_termination_reasons
+            )
         ):
             raise ValueError(
                 "允许completed执行时必须包含"
-                "planner_finished"
+                "completed终止原因"
             )
 
         if (
             not completed_is_allowed
-            and "planner_finished"
-            in self.expected_termination_reasons
+            and completed_termination_reasons
+            .intersection(
+                self.expected_termination_reasons
+            )
         ):
             raise ValueError(
                 "不允许completed执行时不能包含"
-                "planner_finished"
+                "completed终止原因"
             )
 
-        # aborted执行必须至少声明一种
-        # 非planner_finished终止原因。
-        non_finished_reasons = {
+        # aborted执行必须至少声明一种不属于
+        # completed正常终止集合的原因。
+        aborted_termination_reasons = {
             reason
             for reason
             in self.expected_termination_reasons
-            if reason != "planner_finished"
+            if reason
+            not in completed_termination_reasons
         }
 
         if (
             aborted_is_allowed
-            and not non_finished_reasons
+            and not aborted_termination_reasons
         ):
             raise ValueError(
                 "允许aborted执行时必须包含"
@@ -569,7 +588,7 @@ class AgentEvaluationScenario(BaseModel):
         # 就不能把超时、失败等中止原因列为可接受。
         if (
             not aborted_is_allowed
-            and non_finished_reasons
+            and aborted_termination_reasons
         ):
             raise ValueError(
                 "不允许aborted执行时不能包含"
@@ -1090,13 +1109,15 @@ class AgentScenarioEvaluation(BaseModel):
                         "actual_finish_reason"
                     )
 
-                if (
-                    self.actual_termination_reason
-                    != "planner_finished"
-                ):
+                # completed既可能来自Planner正常结束，
+                # 也可能来自Planner前的请求级策略终止。
+                if self.actual_termination_reason not in {
+                    "planner_finished",
+                    "request_policy_finished",
+                }:
                     raise ValueError(
                         "completed执行必须使用"
-                        "planner_finished"
+                        "completed终止原因"
                     )
 
             else:
@@ -1111,13 +1132,13 @@ class AgentScenarioEvaluation(BaseModel):
                         "actual_finish_reason"
                     )
 
-                if (
-                    self.actual_termination_reason
-                    == "planner_finished"
-                ):
+                if self.actual_termination_reason in {
+                    "planner_finished",
+                    "request_policy_finished",
+                }:
                     raise ValueError(
                         "aborted执行不能使用"
-                        "planner_finished"
+                        "completed终止原因"
                     )
 
         # correct字段不能由评分函数任意填写。

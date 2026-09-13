@@ -26,6 +26,12 @@ import pytest
 from app.agent.evidence_store import ConfirmedEvidenceStore
 from app.agent.executor import ToolExecutor
 from app.agent.registry import ToolRegistry
+from app.agent.request_safety_classifier import (
+    AgentRequestSafetyClassifier,
+)
+from app.agent.request_tool_policy import (
+    AgentToolPolicy,
+)
 from app.agent.runner import AgentRunner
 from app.agent.tools.analyze_robot_image import (
     ANALYZE_ROBOT_IMAGE_TOOL_DEFINITION,
@@ -391,6 +397,10 @@ def make_service(
         evidence_store=evidence_store,
         vision_input_adapter=adapter,
         vision_input_store=vision_store,
+        safety_classifier=(
+            AgentRequestSafetyClassifier()
+        ),
+        tool_policy=AgentToolPolicy(),
         planner_prompt_version=TEST_PLANNER_PROMPT_VERSION,
     )
 

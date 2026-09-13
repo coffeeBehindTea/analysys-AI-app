@@ -40,6 +40,10 @@ from app.agent.planner import (
     AgentPlanner,
     OpenAIToolSchema,
 )
+from app.agent.progress_reducer import (
+    AgentProgressReducer,
+    AgentProgressTransitionError,
+)
 # Provider把SDK超时转换成LLMTimeoutError，
 # 把无法解析的模型响应转换成InvalidLLMResponseError。
 #
@@ -56,6 +60,9 @@ from app.schemas.agent_planning import (
     AgentPlannerDecision,
     AgentPlanningContext,
     AgentToolInteraction,
+)
+from app.schemas.agent_progress import (
+    AgentProgress,
 )
 from app.schemas.agent_runtime import (
     AgentRunResult,
@@ -207,6 +214,10 @@ def _build_aborted_result(
     interactions: list[
         AgentToolInteraction
     ],
+    progress: AgentProgress | None = None,
+    progress_reducer: (
+        AgentProgressReducer | None
+    ) = None,
 ) -> AgentRunResult:
     """统一构造保留已完成步骤的安全中止结果。
 
@@ -218,6 +229,26 @@ def _build_aborted_result(
     3. state；
     4. 稳定终止原因。
     """
+
+    final_progress: AgentProgress | None = None
+
+    if progress is not None:
+        if progress_reducer is None:
+            raise TypeError(
+                "有progress时必须提供progress_reducer"
+            )
+
+        # Runner中止表示这次循环出现了不可恢复问题。
+        # Reducer把当前活动快照转换为failed，并保留已经
+        # 完成的能力、工具记录、来源和证据。
+        final_progress = (
+            progress_reducer.fail_progress(
+                progress,
+                missing_information=(
+                    missing_information,
+                ),
+            )
+        )
 
     return AgentRunResult(
         state="aborted",
@@ -239,6 +270,7 @@ def _build_aborted_result(
             for interaction
             in interactions
         ),
+        progress=final_progress,
 
         # 当前每种Runner中止分支只产生一条
         # 面向上层Service的结构化缺失说明。
@@ -259,6 +291,9 @@ class AgentRunner:
         max_steps: int = 5,
         planner_timeout_seconds: float = 30.0,
         max_consecutive_tool_failures: int = 2,
+        progress_reducer: (
+            AgentProgressReducer | None
+        ) = None,
     ) -> None:
         """保存Planner、Executor和运行边界配置。"""
 
@@ -366,8 +401,25 @@ class AgentRunner:
                 "必须大于0且不超过120"
             )
 
+        if (
+            progress_reducer is not None
+            and not isinstance(
+                progress_reducer,
+                AgentProgressReducer,
+            )
+        ):
+            raise TypeError(
+                "progress_reducer必须是"
+                "AgentProgressReducer或None"
+            )
+
         self._planner = planner
         self._executor = executor
+        self._progress_reducer = (
+            AgentProgressReducer()
+            if progress_reducer is None
+            else progress_reducer
+        )
         self._max_steps = max_steps
 
         # 保存连续工具失败上限。
@@ -427,21 +479,70 @@ class AgentRunner:
         allowed_tool_names: (
             frozenset[str] | None
         ) = None,
+        initial_progress: (
+            AgentProgress | None
+        ) = None,
     ) -> AgentRunResult:
-        """在当前请求工具范围内运行规划和观察循环。"""
+        """在当前请求工具范围和进度内运行受控循环。
+
+        initial_progress为None时保留旧调用行为；公开诊断链路
+        会传入由请求级工具策略构造的collecting快照。
+        """
 
         if not isinstance(task, str):
             raise TypeError(
                 "task必须是字符串"
             )
 
+        if (
+            initial_progress is not None
+            and not isinstance(
+                initial_progress,
+                AgentProgress,
+            )
+        ):
+            raise TypeError(
+                "initial_progress必须是"
+                "AgentProgress或None"
+            )
+
+        if initial_progress is not None:
+            if initial_progress.state != "collecting":
+                raise ValueError(
+                    "initial_progress必须处于"
+                    "collecting状态"
+                )
+
+            if initial_progress.tool_records:
+                raise ValueError(
+                    "initial_progress不能包含"
+                    "既有工具记录"
+                )
+
+            # 创建本次运行独有的快照引用。
+            # 后续Reducer仍然会返回新对象，不会原地修改它。
+            progress: AgentProgress | None = (
+                initial_progress.model_copy(
+                    deep=True
+                )
+            )
+        else:
+            progress = None
+
         # None表示使用Executor注册表中的全部只读工具，
         # 从而保持旧的内部调用语义。
         # API Service会明确传入frozenset以启用请求级最小权限。
         if allowed_tool_names is None:
-            active_tool_names = (
-                self._registered_tool_names
-            )
+            if progress is None:
+                active_tool_names = (
+                    self._registered_tool_names
+                )
+            else:
+                # 进度感知调用可以省略重复的工具集合参数；
+                # 此时初始进度就是本次请求的权限来源。
+                active_tool_names = frozenset(
+                    progress.allowed_next_tool_names
+                )
         else:
             if not isinstance(
                 allowed_tool_names,
@@ -477,6 +578,30 @@ class AgentRunner:
                 allowed_tool_names
             )
 
+        if (
+            progress is not None
+            and active_tool_names
+            != frozenset(
+                progress.allowed_next_tool_names
+            )
+        ):
+            raise ValueError(
+                "allowed_tool_names必须与"
+                "initial_progress的工具范围一致"
+            )
+
+        # initial_progress也不能借由省略allowed_tool_names
+        # 引入Executor没有注册的工具。
+        unknown_progress_tool_names = (
+            active_tool_names
+            - self._registered_tool_names
+        )
+
+        if unknown_progress_tool_names:
+            raise ValueError(
+                "初始工具范围包含未注册工具"
+            )
+
         # 保留注册表原有Schema顺序，只删除本次请求不需要的工具。
         # 这是请求开始时的最大允许范围；循环内还会根据已完成
         # 的工具进度继续收窄，但不会重新扩大。
@@ -509,6 +634,40 @@ class AgentRunner:
             AgentToolInteraction
         ] = []
 
+        def build_current_aborted_result(
+            *,
+            termination_reason: (
+                AgentRunTerminationReason
+            ),
+            termination_message: str,
+            missing_information: str,
+            interactions: list[
+                AgentToolInteraction
+            ],
+        ) -> AgentRunResult:
+            """使用当前活动进度构造一次安全中止结果。
+
+            闭包会读取run()中最新的progress变量，因此无论
+            中止发生在第几步，都能保留当时已经确认的进度。
+            """
+
+            return _build_aborted_result(
+                termination_reason=(
+                    termination_reason
+                ),
+                termination_message=(
+                    termination_message
+                ),
+                missing_information=(
+                    missing_information
+                ),
+                interactions=interactions,
+                progress=progress,
+                progress_reducer=(
+                    self._progress_reducer
+                ),
+            )
+
         # call_id重复表示模型重复使用调用标识。
         seen_call_ids: set[str] = set()
 
@@ -531,16 +690,31 @@ class AgentRunner:
             # search_knowledge和draft_test_case，避免重新检索后
             # 生成另一份相互冲突的草案。单纯的检索次数不会触发
             # 这个收窄过程。
-            round_tool_schemas = (
-                _narrow_tool_schemas_after_progress(
-                    active_tool_schemas=(
-                        active_tool_schemas
-                    ),
-                    interactions=tuple(
-                        interactions
-                    ),
+            if progress is None:
+                # 兼容路径沿用Week 5基于交互历史的收窄规则。
+                round_tool_schemas = (
+                    _narrow_tool_schemas_after_progress(
+                        active_tool_schemas=(
+                            active_tool_schemas
+                        ),
+                        interactions=tuple(
+                            interactions
+                        ),
+                    )
                 )
-            )
+            else:
+                # 新路径直接使用Reducer计算出的下一步集合。
+                # Progress只能删除已完成能力对应的工具，不能
+                # 超出请求开始时的active_tool_schemas权限上限。
+                allowed_next_names = frozenset(
+                    progress.allowed_next_tool_names
+                )
+                round_tool_schemas = tuple(
+                    schema
+                    for schema in active_tool_schemas
+                    if schema["function"]["name"]
+                    in allowed_next_names
+                )
             round_tool_names = frozenset(
                 schema["function"]["name"]
                 for schema in round_tool_schemas
@@ -629,7 +803,7 @@ class AgentRunner:
                     len(interactions),
                 )
 
-                return _build_aborted_result(
+                return build_current_aborted_result(
                     termination_reason=(
                         "planner_timeout"
                     ),
@@ -657,7 +831,7 @@ class AgentRunner:
                     len(interactions),
                 )
 
-                return _build_aborted_result(
+                return build_current_aborted_result(
                     termination_reason=(
                         "invalid_planner_response"
                     ),
@@ -685,7 +859,7 @@ class AgentRunner:
                     len(interactions),
                 )
 
-                return _build_aborted_result(
+                return build_current_aborted_result(
                     termination_reason=(
                         "planner_error"
                     ),
@@ -712,7 +886,7 @@ class AgentRunner:
                     len(interactions),
                 )
 
-                return _build_aborted_result(
+                return build_current_aborted_result(
                     termination_reason=(
                         "invalid_planner_response"
                     ),
@@ -732,6 +906,40 @@ class AgentRunner:
                 #
                 # finish_reason和final_message不为空，
                 # tool_call为空。
+                if progress is None:
+                    final_progress = None
+                    progress_missing_information: tuple[
+                        str,
+                        ...,
+                    ] = ()
+                else:
+                    # Planner只提出结束意图；Reducer根据真实
+                    # 能力进度决定最终业务状态。
+                    final_progress = (
+                        self._progress_reducer
+                        .finalize_planner_decision(
+                            progress,
+                            finish_reason=(
+                                decision.finish_reason
+                            ),
+                        )
+                    )
+
+                    # AgentRunResult仍保留Planner原始
+                    # finish_reason。task_completed分支根据旧契约
+                    # 不能同时携带missing_information；权威的
+                    # 修正结果保存在final_progress中。
+                    if (
+                        decision.finish_reason
+                        == "task_completed"
+                    ):
+                        progress_missing_information = ()
+                    else:
+                        progress_missing_information = (
+                            final_progress
+                            .missing_information
+                        )
+
                 return AgentRunResult(
                     state="completed",
                     termination_reason=(
@@ -750,13 +958,16 @@ class AgentRunner:
                         for interaction
                         in interactions
                     ),
+                    progress=final_progress,
 
                     # 当前PlannerDecision还没有单独的
                     # missing_information字段。
                     #
                     # insufficient_information的具体说明
                     # 暂时仍保存在final_message中。
-                    missing_information=(),
+                    missing_information=(
+                        progress_missing_information
+                    ),
 
                     finish_reason=(
                         decision.finish_reason
@@ -782,7 +993,7 @@ class AgentRunner:
                     len(interactions),
                 )
 
-                return _build_aborted_result(
+                return build_current_aborted_result(
                     termination_reason=(
                         "invalid_planner_response"
                     ),
@@ -815,7 +1026,7 @@ class AgentRunner:
                 len(interactions)
                 >= self._max_steps
             ):
-                return _build_aborted_result(
+                return build_current_aborted_result(
                     termination_reason=(
                         "max_steps_reached"
                     ),
@@ -829,61 +1040,133 @@ class AgentRunner:
                     interactions=interactions,
                 )
 
-            try:
-                signature = (
-                    _canonical_tool_call_signature(
-                        executable_call
+            if progress is None:
+                try:
+                    signature = (
+                        _canonical_tool_call_signature(
+                            executable_call
+                        )
                     )
-                )
 
-            except TypeError:
-                # ToolCall只保证arguments是dict，
-                # 其中的Any值仍可能不是合法JSON数据。
-                #
-                # 不把具体参数内容写入日志。
-                logger.warning(
-                    "agent_planner_invalid_response "
-                    "reason=non_json_arguments "
-                    "completed_steps=%d",
-                    len(interactions),
-                )
+                except TypeError:
+                    # ToolCall只保证arguments是dict，
+                    # 其中的Any值仍可能不是合法JSON数据。
+                    #
+                    # 不把具体参数内容写入日志。
+                    logger.warning(
+                        "agent_planner_invalid_response "
+                        "reason=non_json_arguments "
+                        "completed_steps=%d",
+                        len(interactions),
+                    )
 
-                return _build_aborted_result(
-                    termination_reason=(
-                        "invalid_planner_response"
-                    ),
-                    termination_message=(
-                        "Agent规划服务返回了"
-                        "无效工具参数"
-                    ),
-                    missing_information=(
-                        "工具参数不是合法JSON数据，"
-                        "当前任务尚未形成可信最终草稿"
-                    ),
-                    interactions=interactions,
-                )
+                    return build_current_aborted_result(
+                        termination_reason=(
+                            "invalid_planner_response"
+                        ),
+                        termination_message=(
+                            "Agent规划服务返回了"
+                            "无效工具参数"
+                        ),
+                        missing_information=(
+                            "工具参数不是合法JSON数据，"
+                            "当前任务尚未形成可信最终草稿"
+                        ),
+                        interactions=interactions,
+                    )
 
-            if (
-                executable_call.call_id
-                in seen_call_ids
-                or signature
-                in seen_call_signatures
-            ):
-                # 重复请求不会交给Executor，
-                # 因此不会产生新的Interaction。
-                return _build_aborted_result(
-                    termination_reason=(
-                        "duplicate_tool_call"
-                    ),
-                    termination_message=(
-                        "Agent请求了重复工具调用"
-                    ),
-                    missing_information=(
-                        "Planner未能提出新的工具调用，"
-                        "当前任务尚未形成可信最终草稿"
-                    ),
-                    interactions=interactions,
-                )
+                if (
+                    executable_call.call_id
+                    in seen_call_ids
+                    or signature
+                    in seen_call_signatures
+                ):
+                    # 兼容路径继续使用Week 5的重复检测。
+                    return build_current_aborted_result(
+                        termination_reason=(
+                            "duplicate_tool_call"
+                        ),
+                        termination_message=(
+                            "Agent请求了重复工具调用"
+                        ),
+                        missing_information=(
+                            "Planner未能提出新的工具调用，"
+                            "当前任务尚未形成可信最终草稿"
+                        ),
+                        interactions=interactions,
+                    )
+            else:
+                try:
+                    # ProgressReducer同时检查当前状态、最小工具
+                    # 范围、call_id以及规范化参数摘要。
+                    self._progress_reducer.validate_tool_call(
+                        progress,
+                        executable_call,
+                    )
+
+                except AgentProgressTransitionError as exc:
+                    if exc.reason == "duplicate_tool_call":
+                        return build_current_aborted_result(
+                            termination_reason=(
+                                "duplicate_tool_call"
+                            ),
+                            termination_message=(
+                                "Agent请求了重复工具调用"
+                            ),
+                            missing_information=(
+                                "Planner未能提出新的工具调用，"
+                                "当前任务尚未形成可信最终草稿"
+                            ),
+                            interactions=interactions,
+                        )
+
+                    logger.warning(
+                        "agent_progress_tool_blocked "
+                        "reason=%s completed_steps=%d",
+                        exc.reason,
+                        len(interactions),
+                    )
+
+                    return build_current_aborted_result(
+                        termination_reason=(
+                            "tool_policy_violation"
+                        ),
+                        termination_message=(
+                            "Agent工具请求违反当前进度策略"
+                        ),
+                        missing_information=(
+                            "当前工具请求不属于尚未完成的"
+                            "必要能力，任务不能自动继续"
+                        ),
+                        interactions=interactions,
+                    )
+
+                except TypeError:
+                    logger.warning(
+                        "agent_planner_invalid_response "
+                        "reason=non_json_arguments "
+                        "completed_steps=%d",
+                        len(interactions),
+                    )
+
+                    return build_current_aborted_result(
+                        termination_reason=(
+                            "invalid_planner_response"
+                        ),
+                        termination_message=(
+                            "Agent规划服务返回了"
+                            "无效工具参数"
+                        ),
+                        missing_information=(
+                            "工具参数不是合法JSON数据，"
+                            "当前任务尚未形成可信最终草稿"
+                        ),
+                        interactions=interactions,
+                    )
+
+                # 进度感知路径的SHA-256签名会由Reducer写入
+                # AgentToolProgressRecord，不再写入旧集合。
+                signature = None
 
             result = await (
                 self._executor.execute(
@@ -919,13 +1202,33 @@ class AgentRunner:
                 ),
             )
 
+            if progress is not None:
+                # record_interaction会再次校验调用，并把经过
+                # 特定输出模型验证的来源、证据和能力写入新快照。
+                progress = (
+                    self._progress_reducer
+                    .record_interaction(
+                        progress,
+                        interaction,
+                    )
+                )
+
             interactions.append(interaction)
-            seen_call_ids.add(
-                executable_call.call_id
-            )
-            seen_call_signatures.add(
-                signature
-            )
+
+            if progress is None:
+                seen_call_ids.add(
+                    executable_call.call_id
+                )
+
+                # progress为None时signature必然由旧路径生成。
+                if signature is None:
+                    raise RuntimeError(
+                        "旧Runner路径缺少调用签名"
+                    )
+
+                seen_call_signatures.add(
+                    signature
+                )
 
             # 失败策略必须在Interaction保存之后执行。
             #
@@ -961,7 +1264,7 @@ class AgentRunner:
                     len(interactions),
                 )
 
-                return _build_aborted_result(
+                return build_current_aborted_result(
                     termination_reason=(
                         "tool_policy_violation"
                     ),
@@ -995,7 +1298,7 @@ class AgentRunner:
                     len(interactions),
                 )
 
-                return _build_aborted_result(
+                return build_current_aborted_result(
                     termination_reason=(
                         "tool_failure_limit_reached"
                     ),

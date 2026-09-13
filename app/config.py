@@ -129,6 +129,17 @@ class Settings(BaseSettings):
         ge=1,
     )
 
+    # ---------- 诊断会话持久化配置 ----------
+
+    # 每次Agent诊断完成后，会把经过脱敏和Schema校验的
+    # DiagnosticSessionRecord保存到这个目录。
+    #
+    # Settings只负责把环境变量转换成Path，
+    # 不会在应用导入阶段创建目录；第一次保存时才创建。
+    diagnostic_session_directory: Path = Path(
+        "data/diagnostic_sessions"
+    )
+
     # ---------- Vision模型与输入策略 ----------
 
     # Vision服务可能与文本LLM来自不同厂商，

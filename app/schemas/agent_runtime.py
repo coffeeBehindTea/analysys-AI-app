@@ -12,7 +12,6 @@
 """
 
 from typing import (
-    Annotated,
     Literal,
     Self,
 )
@@ -29,6 +28,10 @@ from app.schemas.agent_planning import (
     AgentPlannerFinishReason,
     AgentToolInteraction,
 )
+from app.schemas.agent_progress import (
+    AgentMissingInformation,
+    AgentProgress,
+)
 
 
 # AgentRunner当前支持的结构化终止原因。
@@ -38,6 +41,10 @@ from app.schemas.agent_planning import (
 AgentRunTerminationReason = Literal[
     # Planner主动返回finish决定。
     "planner_finished",
+
+    # 请求级安全分类或工具策略在Planner启动前
+    # 已经确定必须拒答或转人工审核。
+    "request_policy_finished",
 
     # Planner在已经执行max_steps个工具后，
     # 仍然请求继续调用工具。
@@ -62,23 +69,6 @@ AgentRunTerminationReason = Literal[
 
     # 工具请求触碰只读或风险权限边界。
     "tool_policy_violation",
-]
-
-
-# 一条尚未解决的信息说明。
-#
-# Annotated把str类型与Field约束组合起来，
-# 因而tuple中的每一个字符串都会执行长度校验。
-AgentMissingInformation = Annotated[
-    str,
-    Field(
-        min_length=1,
-        max_length=500,
-        description=(
-            "Agent结束时仍然缺少或"
-            "无法确认的一项信息"
-        ),
-    ),
 ]
 
 
@@ -142,6 +132,14 @@ class AgentRunResult(BaseModel):
         ),
     )
 
+    progress: AgentProgress | None = Field(
+        default=None,
+        description=(
+            "启用证据驱动状态机时生成的最终进度快照；"
+            "None用于兼容尚未迁移的内部调用方"
+        ),
+    )
+
     missing_information: tuple[
         AgentMissingInformation,
         ...,
@@ -202,6 +200,60 @@ class AgentRunResult(BaseModel):
         self,
     ) -> Self:
         """正常完成和中止结果必须使用不同字段组合。"""
+
+        if self.progress is not None:
+            # 一条AgentProgress工具记录必须对应一条真实
+            # AgentToolInteraction，不能增加或隐藏工具步骤。
+            if len(
+                self.progress.tool_records
+            ) != len(self.interactions):
+                raise ValueError(
+                    "progress.tool_records必须与"
+                    "interactions数量一致"
+                )
+
+            for record, interaction in zip(
+                self.progress.tool_records,
+                self.interactions,
+                strict=True,
+            ):
+                if (
+                    record.step_number
+                    != interaction.step_number
+                    or record.call_id
+                    != interaction.tool_call.call_id
+                    or record.tool_name
+                    != interaction.tool_call.tool_name
+                    or record.status
+                    != interaction.result.status
+                ):
+                    raise ValueError(
+                        "progress.tool_records必须与"
+                        "interactions逐项对应"
+                    )
+
+            if (
+                self.state == "completed"
+                and self.progress.state
+                not in {
+                    "completed",
+                    "partial",
+                    "abstained",
+                    "human_review_required",
+                }
+            ):
+                raise ValueError(
+                    "正常结束的Runner必须包含"
+                    "终态AgentProgress"
+                )
+
+            if (
+                self.state == "aborted"
+                and self.progress.state != "failed"
+            ):
+                raise ValueError(
+                    "中止的Runner必须包含failed进度"
+                )
 
         if self.state == "completed":
             if (

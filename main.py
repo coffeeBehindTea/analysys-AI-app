@@ -4,8 +4,11 @@
 不在这里实现具体的机器人故障分析业务。
 """
 
+from pathlib import Path
+
 # FastAPI 是应用主类。实例化后得到整个 Web 应用对象。
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.errors import ApplicationError
 from app.exception_handlers import application_error_handler
@@ -24,6 +27,26 @@ from app.routers.diagnostics import (
 # 不会执行Agent、工具或LLM请求。
 from app.routers.agent import (
     router as agent_router,
+)
+from app.routers.diagnostic_sessions import (
+    router as diagnostic_sessions_router,
+)
+
+
+# 使用main.py所在目录作为项目根目录，构造Web静态文件绝对路径。
+#
+# 不依赖启动命令的当前工作目录，原因是：
+#
+# 1. 本地可能从项目根目录执行Uvicorn；
+# 2. Docker中的WORKDIR可能与本机路径不同；
+# 3. IDE和测试工具也可能使用不同的当前目录。
+#
+# resolve()把路径转换成规范绝对路径，parent取得main.py所在目录，
+# /运算符由pathlib.Path重载，用于安全拼接子目录。
+WEB_CONSOLE_DIRECTORY = (
+    Path(__file__).resolve().parent
+    / "app"
+    / "web"
 )
 
 
@@ -67,6 +90,32 @@ def create_app() -> FastAPI:
     # POST /api/v1/agent/diagnose
     application.include_router(
         agent_router
+    )
+
+    # 注册诊断会话只读查询接口：
+    #
+    # GET /api/v1/diagnostic-sessions
+    # GET /api/v1/diagnostic-sessions/{session_id}
+    #
+    # Router本身不读取文件，真实Store由FastAPI依赖注入。
+    application.include_router(
+        diagnostic_sessions_router
+    )
+
+    # 将app/web挂载到/console。
+    #
+    # StaticFiles只负责读取和返回静态文件，不会执行其中的
+    # JavaScript，也不会获得Agent Service或其他业务依赖。
+    #
+    # html=True使/console/自动查找index.html。
+    # 浏览器随后会继续请求/console/styles.css和/console/app.js。
+    application.mount(
+        "/console",
+        StaticFiles(
+            directory=WEB_CONSOLE_DIRECTORY,
+            html=True,
+        ),
+        name="web_console",
     )
 
     return application

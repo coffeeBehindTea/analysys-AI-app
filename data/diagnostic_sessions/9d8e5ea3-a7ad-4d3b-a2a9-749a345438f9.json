@@ -1,0 +1,192 @@
+{
+  "schema_version": "diagnostic-session-v1",
+  "session_id": "9d8e5ea3-a7ad-4d3b-a2a9-749a345438f9",
+  "request_id": "4ccff64e-a31a-48ce-aac1-daed8f4fec24",
+  "created_at": "2026-09-09T06:31:01.412685Z",
+  "request_summary": {
+    "robot_id": "robot-001",
+    "symptom_summary": "网络恢复后机器人仍暂停",
+    "task_goal_summary": "读取面板状态并检索网络故障恢复规则，说明旧任务为什么不能自动继续",
+    "log_excerpt_sha256": "2b7960415757c922da733aa3390f9b628e0e14c1d0e3d22dc86f752e77225946",
+    "log_excerpt_char_count": 55,
+    "image_count": 1
+  },
+  "status": "completed",
+  "execution_state": "completed",
+  "termination_reason": "planner_finished",
+  "finish_reason": "task_completed",
+  "diagnosis": {
+    "prompt_version": "agent-tool-calling-v6",
+    "gate_version": "agent-confirmed-evidence-v1",
+    "status": "completed",
+    "evidence": [
+      {
+        "chunk_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+        "document_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+        "source_file": "京东无人仓场景-仓储机器人测试规程与判定标准.md",
+        "page_or_section": "section: 京东无人仓公开场景下的仓储机器人测试规程与判定标准 > 10. 网络与调度测试 > 10.1 TEST-NET-001 调度心跳中断",
+        "rank": 1,
+        "rrf_score": 0.03278688524590164,
+        "vector_similarity": 0.540658175945282,
+        "excerpt": "### 10.1 TEST-NET-001 调度心跳中断\n\n#### 测试目的\n\n验证机器人与 RCS/RMS 的通信中断超过 1500 ms 后进入安全状态。\n\n#### 测试步骤\n\n1. 下发一项无载移动任务。\n2. 使用故障注入工具中断机器人与调度服务器的通信。\n3. 保持中断超过 1500 ms。\n4. 记录车体动作、本地告警和服务器状态。\n5. 恢复网络，但不下发人工恢复命令。\n\n#### 通过标准\n\n- 超过 1500 ms 后上报或本地记录 `ERR-NET-4001`；\n- 机器人进入原地制动或预先批准的安全停车状态；\n- 通信恢复后不自动继续旧任务；\n- RCS/RMS 完成状态核对并下发恢复命令后才能继续运行。"
+      },
+      {
+        "chunk_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+        "document_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+        "source_file": "仓储机器人故障说明.txt",
+        "page_or_section": "section: ERR-NET-4001",
+        "rank": 2,
+        "rrf_score": 0.03225806451612903,
+        "vector_similarity": 0.5332832932472229,
+        "excerpt": "故障代码 (ErrorCode)\nERR-NET-4001\n故障名称\n心跳包超时 (Heartbeat Loss)\n触发条件 / 现象\nAGV 与 5G/Wi-Fi 调度服务器失去通信通信连通性超 1500ms。\n可能原因 (Root Cause)\n1. 仓库 AP 漫游切换失败；2. 信号盲区或高频电磁干扰；3. 车载网关模块断电。\n排查与修复步骤 (Action Steps)\n1. 观察机器人是否自动进入原地制动状态；2. 检查现场 Wi-Fi 信号强度（信噪比 SNR）；3. 手持终端通过局域网直连或重启车载无线网关。\n严重等级\n紧急 (Fatal)"
+      }
+    ],
+    "possible_causes": [
+      {
+        "description": "网络恢复后旧任务不自动继续是设计行为：根据测试规程TEST-NET-001，通信恢复后机器人不会自动继续旧任务，必须由RCS/RMS完成状态核对并下发恢复命令后才能继续运行。",
+        "evidence_chunk_ids": [
+          "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+        ]
+      },
+      {
+        "description": "ERR-NET-4001为心跳包超时故障，触发条件为AGV与调度服务器通信中断超过1500ms，属于紧急（Fatal）级别故障，需要人工排查与修复。",
+        "evidence_chunk_ids": [
+          "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+        ]
+      }
+    ],
+    "next_checks": [
+      {
+        "description": "确认RCS/RMS已完成状态核对并下发恢复命令，之后机器人才能从PAUSED状态恢复继续旧任务。",
+        "evidence_chunk_ids": [
+          "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+        ],
+        "risk_level": "medium",
+        "requires_qualified_person": true
+      }
+    ],
+    "risk_level": "medium",
+    "missing_information": [],
+    "abstained": false
+  },
+  "tool_events": [
+    {
+      "step_id": 1,
+      "event_type": "tool_execution",
+      "tool_name": "analyze_robot_image",
+      "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
+      "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=5；indicator_count=3；requires_human_check=false",
+      "status": "success",
+      "duration_ms": 6089.386499999819,
+      "error_code": null
+    },
+    {
+      "step_id": 2,
+      "event_type": "tool_execution",
+      "tool_name": "search_knowledge",
+      "input_summary": "知识库检索；query_chars=41；top_k=3",
+      "result_summary": "知识库返回2条已确认引用；retrieval_ms=343.063",
+      "status": "success",
+      "duration_ms": 343.18030000213184,
+      "error_code": null
+    }
+  ],
+  "vision_observations": [
+    {
+      "step_id": 1,
+      "image_ref": "image_001",
+      "observation": {
+        "status": "completed",
+        "image_quality": "clear",
+        "observations": [
+          {
+            "description": "面板顶部显示标题文本“ROBOT STATUS PANEL”。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板顶部"
+          },
+          {
+            "description": "故障码标签右侧显示文本“ERR-NET-4001”。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板中间偏上"
+          },
+          {
+            "description": "网络标签右侧显示文本“CONNECTED”。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板中间"
+          },
+          {
+            "description": "任务标签右侧显示文本“PAUSED”。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板中间偏下"
+          },
+          {
+            "description": "面板底部显示文本“SYNTHETIC TRAINING SAMPLE”。",
+            "category": "visible_text",
+            "confidence": "high",
+            "region": "面板底部"
+          }
+        ],
+        "visible_indicators": [
+          {
+            "label": "故障码",
+            "observed_state": "ERR-NET-4001",
+            "confidence": "high",
+            "region": "面板中间偏上"
+          },
+          {
+            "label": "网络连接状态",
+            "observed_state": "CONNECTED",
+            "confidence": "high",
+            "region": "面板中间"
+          },
+          {
+            "label": "任务状态",
+            "observed_state": "PAUSED",
+            "confidence": "high",
+            "region": "面板中间偏下"
+          }
+        ],
+        "uncertain_items": [],
+        "untrusted_text_detected": false,
+        "untrusted_text_notes": [],
+        "requires_human_check": false,
+        "human_check_reasons": [],
+        "source": "vision_model",
+        "source_image_sha256": "992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+        "prompt_version": "robot-vision-observation-v2",
+        "model_name": "deepseek-v4-flash-vision-exp"
+      }
+    }
+  ],
+  "telemetry_observations": [],
+  "test_case_drafts": [],
+  "evidence_coverage": {
+    "confirmed_source_ids": [
+      "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+      "knowledge:5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+      "knowledge:dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652"
+    ],
+    "covered_evidence_ids": [
+      "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367:call_00_6jyFhDRzWBetTyjq8Buv0073",
+      "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+      "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+    ],
+    "cited_chunk_ids": [
+      "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+      "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+    ]
+  },
+  "metrics": {
+    "total_duration_ms": 12263.332599999558,
+    "tool_step_count": 2,
+    "failed_tool_count": 0,
+    "failed_tool_names": [],
+    "confirmed_source_count": 3,
+    "covered_evidence_count": 3,
+    "citation_count": 2
+  }
+}

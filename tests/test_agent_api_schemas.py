@@ -665,6 +665,95 @@ def test_aborted_execution_requires_missing_information(
     ]
 
 
+def test_request_policy_can_finish_with_human_review(
+) -> None:
+    """Planner前的安全策略可以零步骤转人工审核。"""
+
+    summary = AgentExecutionSummary(
+        planner_prompt_version=(
+            "agent-tool-calling-v2"
+        ),
+        state="completed",
+        termination_reason=(
+            "request_policy_finished"
+        ),
+        termination_message=(
+            "请求涉及真实设备控制，需要人工审核"
+        ),
+        finish_reason=(
+            "human_review_required"
+        ),
+        step_count=0,
+        steps=[],
+        missing_information=[
+            "需要有资质人员确认设备安全状态"
+        ],
+    )
+
+    assert summary.step_count == 0
+    assert summary.finish_reason == (
+        "human_review_required"
+    )
+
+
+def test_request_policy_cannot_claim_task_completed(
+) -> None:
+    """没有运行Planner和工具的策略终止不能声称任务完成。"""
+
+    with pytest.raises(
+        ValidationError,
+        match="不能使用task_completed",
+    ):
+        AgentExecutionSummary(
+            planner_prompt_version=(
+                "agent-tool-calling-v2"
+            ),
+            state="completed",
+            termination_reason=(
+                "request_policy_finished"
+            ),
+            termination_message=(
+                "请求策略提前结束"
+            ),
+            finish_reason="task_completed",
+            step_count=0,
+            steps=[],
+            missing_information=[],
+        )
+
+
+def test_request_policy_cannot_contain_tool_steps(
+) -> None:
+    """Planner前结束的摘要不能伪造任何已执行工具步骤。"""
+
+    with pytest.raises(
+        ValidationError,
+        match="不能包含工具执行步骤",
+    ):
+        AgentExecutionSummary(
+            planner_prompt_version=(
+                "agent-tool-calling-v2"
+            ),
+            state="completed",
+            termination_reason=(
+                "request_policy_finished"
+            ),
+            termination_message=(
+                "请求策略提前结束"
+            ),
+            finish_reason=(
+                "human_review_required"
+            ),
+            step_count=1,
+            steps=[
+                make_success_trace(),
+            ],
+            missing_information=[
+                "需要人工审核"
+            ],
+        )
+
+
 def test_execution_rejects_step_count_mismatch(
 ) -> None:
     """声明的step_count必须等于实际轨迹数量。"""

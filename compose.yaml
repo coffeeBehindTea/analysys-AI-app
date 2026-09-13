@@ -1,0 +1,76 @@
+# 定义这组容器资源的项目名称。
+#
+# Docker Compose会用它作为容器、网络等资源的名称前缀，
+# 避免与其他项目的容器混在一起。
+name: robotops-copilot
+
+
+services:
+  # 当前项目只有一个FastAPI应用服务。
+  #
+  # ChromaDB在本项目中使用嵌入式PersistentClient，
+  # 不需要再启动一个独立的Chroma服务器容器。
+  robotops-copilot:
+    # Docker Compose根据项目根目录中的Dockerfile构建镜像。
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # 给构建结果设置稳定的本地镜像名称和标签。
+    image: robotops-copilot:week6
+
+    # 读取宿主机.env，并把其中的配置作为环境变量
+    # 注入容器进程。
+    #
+    # .env不会被复制进镜像。
+    env_file:
+      - .env
+
+    # 这里明确覆盖两个与容器文件系统有关的路径。
+    #
+    # environment中的同名变量优先级高于env_file，
+    # 因此即使.env中使用Windows相对路径，
+    # 容器内也会固定使用下面的Linux绝对路径。
+    environment:
+      CHROMA_PERSIST_DIRECTORY: /app/chroma_data
+      DIAGNOSTIC_SESSION_DIRECTORY: /app/data/diagnostic_sessions
+
+    # 将Windows宿主机的8000端口映射到容器的8000端口。
+    #
+    # 左侧是宿主机端口；
+    # 右侧是容器内Uvicorn监听的端口。
+    ports:
+      - "8000:8000"
+
+    # 把需要跨容器重建保留的数据目录挂载进容器。
+    volumes:
+      # 使用宿主机已经恢复的355个知识库Chunk。
+      #
+      # type: bind表示直接映射宿主机目录，
+      # 不把数据库复制进镜像。
+      - type: bind
+        source: ./chroma_data
+        target: /app/chroma_data
+
+      # 将脱敏诊断会话保存在宿主机项目目录。
+      #
+      # 删除或重新构建容器后，会话文件仍然存在。
+      - type: bind
+        source: ./data/diagnostic_sessions
+        target: /app/data/diagnostic_sessions
+
+    # 启用一个很小的init进程作为容器1号进程。
+    #
+    # 它负责转发停止信号并回收已经退出的子进程。
+    # Tesseract OCR会产生子进程，因此启用init更稳妥。
+    init: true
+
+    # 容器异常退出或Docker Desktop重启后自动恢复服务。
+    #
+    # 如果使用者主动执行docker compose stop，
+    # 容器不会立刻被自动拉起。
+    restart: unless-stopped
+
+    # 停止容器时，先给Uvicorn最多30秒完成连接关闭，
+    # 超时后Docker才会强制终止进程。
+    stop_grace_period: 30s

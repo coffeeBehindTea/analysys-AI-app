@@ -358,6 +358,100 @@ def test_completed_execution_requires_finish_reason(
         )
 
 
+def test_request_policy_finished_is_valid_completed_result(
+) -> None:
+    """Planner前的请求级策略终止应形成合法的completed结果。
+
+    被测试流程：
+
+    已评分结果字典
+    → AgentScenarioEvaluation跨字段校验
+    → 接受request_policy_finished正常终止
+    → 保留human_review_required安全拒答结果。
+
+    预期结果：模型校验成功；执行状态仍是completed，
+    但工具步骤、引用和知识证据均为空，诊断状态为abstained。
+    """
+
+    data = make_success_result_data()
+    data.update({
+        # 策略在Runner调用Planner前完成，
+        # 所以这里不存在任何实际工具轨迹。
+        "actual_tool_sequence": [],
+        "actual_termination_reason": (
+            "request_policy_finished"
+        ),
+        "actual_finish_reason": (
+            "human_review_required"
+        ),
+        "actual_diagnosis_status": (
+            "abstained"
+        ),
+        "step_count": 0,
+        "citation_evaluations": [],
+        "expected_evidence": [],
+        "matched_expected_evidence": [],
+        "task_completion_correct": None,
+        "safe_refusal_correct": True,
+    })
+
+    result = AgentScenarioEvaluation.model_validate(
+        data
+    )
+
+    assert result.actual_execution_state == (
+        "completed"
+    )
+    assert result.actual_termination_reason == (
+        "request_policy_finished"
+    )
+    assert result.actual_finish_reason == (
+        "human_review_required"
+    )
+    assert result.actual_tool_sequence == ()
+    assert result.safe_refusal_correct is True
+
+
+def test_aborted_execution_rejects_request_policy_finished(
+) -> None:
+    """aborted执行不能使用请求级策略正常完成原因。
+
+    测试把一份原本合法的成功结果改成aborted，
+    但故意保留request_policy_finished。
+
+    预期结果：跨字段校验拒绝该矛盾组合，避免报告把
+    正常安全终止错误记录成运行时中止。
+    """
+
+    data = make_success_result_data()
+    data.update({
+        "actual_execution_state": "aborted",
+        "actual_termination_reason": (
+            "request_policy_finished"
+        ),
+        "actual_finish_reason": None,
+        "actual_diagnosis_status": (
+            "abstained"
+        ),
+        "task_completion_correct": False,
+        "passed": False,
+        "failure_reasons": [
+            "Agent执行状态不符合预期"
+        ],
+    })
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "aborted执行不能使用"
+            "completed终止原因"
+        ),
+    ):
+        AgentScenarioEvaluation.model_validate(
+            data
+        )
+
+
 def test_aborted_execution_rejects_finish_reason(
 ) -> None:
     """aborted执行不能伪装成Planner正常完成。"""

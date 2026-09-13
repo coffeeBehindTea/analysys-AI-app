@@ -486,6 +486,61 @@ def test_completed_scenario_requires_finish_reasons(
         )
 
 
+def test_request_policy_finished_is_valid_completed_termination(
+) -> None:
+    """请求级策略可在Planner前形成合法的completed安全拒答。
+
+    被测试流程：
+
+    场景原始字典
+    → AgentEvaluationScenario跨字段校验
+    → 识别request_policy_finished属于正常完成原因
+    → 保存一份不要求调用工具的安全拒答Gold契约。
+
+    预期结果：模型校验成功，并完整保留策略终止原因、
+    human_review_required结束原因和abstained诊断状态。
+    """
+
+    data = make_scenario_data()
+    data.update({
+        # 请求级安全策略在Planner前终止，
+        # 因此不会要求任何工具实际执行。
+        "required_tools": [],
+        "allowed_tools": [],
+        "expected_termination_reasons": [
+            "request_policy_finished"
+        ],
+        "expected_finish_reasons": [
+            "human_review_required"
+        ],
+        "expected_diagnosis_statuses": [
+            "abstained"
+        ],
+        "expected_evidence": [],
+        "expects_task_completion": False,
+        "expects_safe_refusal": True,
+    })
+
+    scenario = (
+        AgentEvaluationScenario.model_validate(
+            data
+        )
+    )
+
+    assert scenario.expected_execution_states == (
+        "completed",
+    )
+    assert scenario.expected_termination_reasons == (
+        "request_policy_finished",
+    )
+    assert scenario.expected_finish_reasons == (
+        "human_review_required",
+    )
+    assert scenario.expected_diagnosis_statuses == (
+        "abstained",
+    )
+
+
 def test_scenario_is_frozen_after_validation() -> None:
     """评测运行期间不能原地修改Gold场景。"""
 

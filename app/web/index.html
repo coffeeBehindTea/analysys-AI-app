@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+
+    <!--
+    viewport让页面在手机和窄窗口中按照设备宽度布局，
+    避免浏览器按桌面页面宽度缩放。
+    -->
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>RobotOps Copilot Beta</title>
+
+    <!--
+    使用内嵌SVG作为站点图标。
+
+    浏览器不需要再额外请求/favicon.ico，
+    因此不会在FastAPI日志中产生无意义的404记录。
+    图标不包含外部地址，也不会触发第三方网络请求。
+    -->
+    <link
+        rel="icon"
+        type="image/svg+xml"
+        href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%230c6478'/%3E%3Cpath%20d='M18%2021h28v25H18z'%20fill='none'%20stroke='white'%20stroke-width='4'/%3E%3Ccircle%20cx='26'%20cy='32'%20r='3'%20fill='white'/%3E%3Ccircle%20cx='38'%20cy='32'%20r='3'%20fill='white'/%3E%3Cpath%20d='M25%2040h14M32%2015v6'%20stroke='white'%20stroke-width='4'%20stroke-linecap='round'/%3E%3C/svg%3E"
+    >
+
+    <!--
+    CSS和JavaScript稍后创建。
+
+    使用/console/绝对路径，是因为FastAPI之后会把
+    app/web目录挂载到/console。
+    -->
+    <link
+        rel="stylesheet"
+        href="/console/styles.css"
+    >
+    <script
+        src="/console/app.js"
+        defer
+    ></script>
+</head>
+
+<body>
+    <!--
+    键盘用户可以直接跳过页头，进入主要操作区域。
+    该链接平时由CSS隐藏，获得焦点时显示。
+    -->
+    <a
+        class="skip-link"
+        href="#workspace"
+    >
+        跳到诊断工作区
+    </a>
+
+    <header class="site-header">
+        <div>
+            <p class="eyebrow">
+                Robot Diagnostic Agent
+            </p>
+
+            <h1>RobotOps Copilot Beta</h1>
+
+            <p class="site-description">
+                提交脱敏故障信息和可选现场图片，
+                查看有来源标注的诊断结果与完整脱敏轨迹。
+            </p>
+        </div>
+
+        <!--
+        app-status由JavaScript更新：
+        checking、ready或者unavailable。
+        aria-live让辅助阅读设备能够读取状态变化。
+        -->
+        <div
+            id="app-status"
+            class="status-pill status-checking"
+            role="status"
+            aria-live="polite"
+        >
+            正在检查服务状态
+        </div>
+    </header>
+
+    <main
+        id="workspace"
+        class="workspace"
+    >
+        <!-- 诊断请求输入区。 -->
+        <section
+            class="panel request-panel"
+            aria-labelledby="request-heading"
+        >
+            <div class="panel-heading">
+                <div>
+                    <p class="section-number">
+                        01
+                    </p>
+                    <h2 id="request-heading">
+                        诊断输入
+                    </h2>
+                </div>
+
+                <p>
+                    只提交完成任务所需的脱敏信息。
+                </p>
+            </div>
+
+            <!--
+            novalidate关闭浏览器默认弹窗。
+            JavaScript仍会执行明确的前端校验，
+            后端Pydantic仍是最终可信校验边界。
+            -->
+            <form
+                id="diagnosis-form"
+                novalidate
+            >
+                <div class="field">
+                    <label for="robot-id">
+                        机器人编号
+                    </label>
+
+                    <input
+                        id="robot-id"
+                        name="robot_id"
+                        type="text"
+                        maxlength="100"
+                        autocomplete="off"
+                        placeholder="例如：robot-demo-001"
+                        required
+                    >
+
+                    <p class="field-help">
+                        使用教学编号或已经脱敏的设备编号。
+                    </p>
+                </div>
+
+                <div class="field">
+                    <label for="symptom">
+                        故障现象
+                    </label>
+
+                    <textarea
+                        id="symptom"
+                        name="symptom"
+                        rows="4"
+                        maxlength="2000"
+                        placeholder="描述能够直接观察到的现象"
+                        required
+                    ></textarea>
+                </div>
+
+                <div class="field">
+                    <label for="log-excerpt">
+                        脱敏日志摘要
+                    </label>
+
+                    <textarea
+                        id="log-excerpt"
+                        name="log_excerpt"
+                        rows="5"
+                        maxlength="10000"
+                        placeholder="删除密钥、账号、客户信息和无关完整日志后再提交"
+                        required
+                    ></textarea>
+
+                    <p class="field-help">
+                        会话记录只保存摘要、字符数和SHA-256，
+                        不保存这里的完整内容。
+                    </p>
+                </div>
+
+                <div class="field">
+                    <label for="task-goal">
+                        可选任务目标
+                    </label>
+
+                    <textarea
+                        id="task-goal"
+                        name="task_goal"
+                        rows="3"
+                        maxlength="2000"
+                        placeholder="例如：核对故障原因、当前状态和安全恢复条件"
+                    ></textarea>
+                </div>
+
+                <fieldset class="image-fieldset">
+                    <legend>可选现场图片</legend>
+
+                    <div class="field">
+                        <label for="image-files">
+                            选择图片
+                        </label>
+
+                        <input
+                            id="image-files"
+                            name="image_files"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            multiple
+                        >
+
+                        <p class="field-help">
+                            最多3张，仅支持JPEG、PNG和WebP。
+                            图片通过当前诊断请求发送，不进入会话文件。
+                        </p>
+
+                        <ul
+                            id="image-summary"
+                            class="image-summary"
+                            aria-live="polite"
+                        ></ul>
+                    </div>
+
+                    <div class="field">
+                        <label for="analysis-goal">
+                            图片分析目标
+                        </label>
+
+                        <textarea
+                            id="analysis-goal"
+                            name="analysis_goal"
+                            rows="3"
+                            maxlength="2000"
+                            placeholder="例如：只读取面板中可见的故障码、指示灯和连接状态"
+                        ></textarea>
+
+                        <p class="field-help">
+                            只有选择图片时才需要填写。
+                            同一个目标会应用到本次请求的所有图片。
+                        </p>
+                    </div>
+
+                    <div class="field">
+                        <label for="image-detail">
+                            Vision细节级别
+                        </label>
+
+                        <select
+                            id="image-detail"
+                            name="image_detail"
+                        >
+                            <option
+                                value="auto"
+                                selected
+                            >
+                                自动
+                            </option>
+                            <option value="low">
+                                低细节
+                            </option>
+                            <option value="high">
+                                高细节
+                            </option>
+                        </select>
+                    </div>
+                </fieldset>
+
+                <div class="form-actions">
+                    <button
+                        id="submit-button"
+                        class="primary-button"
+                        type="submit"
+                    >
+                        开始诊断
+                    </button>
+
+                    <button
+                        id="reset-button"
+                        class="secondary-button"
+                        type="reset"
+                    >
+                        清空输入
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <!-- 诊断结果展示区。 -->
+        <section
+            class="panel result-panel"
+            aria-labelledby="result-heading"
+        >
+            <div class="panel-heading">
+                <div>
+                    <p class="section-number">
+                        02
+                    </p>
+                    <h2 id="result-heading">
+                        诊断结果
+                    </h2>
+                </div>
+
+                <p id="result-status">
+                    尚未执行诊断
+                </p>
+            </div>
+
+            <!-- 请求尚未开始时显示。 -->
+            <div
+                id="empty-state"
+                class="empty-state"
+            >
+                <p>
+                    提交左侧表单后，这里将显示结构化诊断、
+                    引用、视觉观察、工具轨迹和终止原因。
+                </p>
+            </div>
+
+            <!--
+            网络错误、422校验错误或者应用错误显示在这里。
+            hidden属性由JavaScript控制。
+            -->
+            <div
+                id="error-panel"
+                class="error-panel"
+                role="alert"
+                hidden
+            >
+                <h3>请求未完成</h3>
+                <p id="error-message"></p>
+                <p id="error-request-id"></p>
+            </div>
+
+            <!-- 成功取得HTTP 200响应后显示。 -->
+            <article
+                id="diagnosis-result"
+                hidden
+            >
+                <section
+                    class="result-section"
+                    aria-labelledby="summary-heading"
+                >
+                    <h3 id="summary-heading">
+                        执行摘要
+                    </h3>
+
+                    <dl class="summary-grid">
+                        <div>
+                            <dt>请求 ID</dt>
+                            <dd id="response-request-id">—</dd>
+                        </div>
+
+                        <div>
+                            <dt>会话 ID</dt>
+                            <dd id="response-session-id">—</dd>
+                        </div>
+
+                        <div>
+                            <dt>诊断状态</dt>
+                            <dd id="diagnosis-status">—</dd>
+                        </div>
+
+                        <div>
+                            <dt>终止原因</dt>
+                            <dd id="termination-reason">—</dd>
+                        </div>
+
+                        <div>
+                            <dt>结束语义</dt>
+                            <dd id="finish-reason">—</dd>
+                        </div>
+
+                        <div>
+                            <dt>工具步骤数</dt>
+                            <dd id="tool-step-count">0</dd>
+                        </div>
+                    </dl>
+                </section>
+
+                <section
+                    class="result-section"
+                    aria-labelledby="causes-heading"
+                >
+                    <h3 id="causes-heading">
+                        可能原因
+                    </h3>
+                    <ul id="possible-causes"></ul>
+                </section>
+
+                <section
+                    class="result-section"
+                    aria-labelledby="checks-heading"
+                >
+                    <h3 id="checks-heading">
+                        后续检查
+                    </h3>
+                    <ol id="next-checks"></ol>
+                </section>
+
+                <section
+                    class="result-section"
+                    aria-labelledby="missing-heading"
+                >
+                    <h3 id="missing-heading">
+                        缺失信息
+                    </h3>
+                    <ul id="missing-information"></ul>
+                </section>
+
+                <section
+                    class="result-section"
+                    aria-labelledby="citations-heading"
+                >
+                    <h3 id="citations-heading">
+                        知识库引用
+                    </h3>
+                    <div id="citation-list"></div>
+                </section>
+
+                <section
+                    class="result-section"
+                    aria-labelledby="vision-heading"
+                >
+                    <h3 id="vision-heading">
+                        视觉观察
+                    </h3>
+                    <div id="vision-observation-list"></div>
+                </section>
+
+                <section
+                    class="result-section"
+                    aria-labelledby="telemetry-heading"
+                >
+                    <h3 id="telemetry-heading">
+                        模拟遥测
+                    </h3>
+                    <div id="telemetry-list"></div>
+                </section>
+
+                <section
+                    class="result-section"
+                    aria-labelledby="draft-heading"
+                >
+                    <h3 id="draft-heading">
+                        测试草案
+                    </h3>
+                    <div id="test-draft-list"></div>
+                </section>
+
+                <section
+                    class="result-section"
+                    aria-labelledby="trace-heading"
+                >
+                    <h3 id="trace-heading">
+                        工具执行轨迹
+                    </h3>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">步骤</th>
+                                    <th scope="col">工具</th>
+                                    <th scope="col">状态</th>
+                                    <th scope="col">输入摘要</th>
+                                    <th scope="col">结果摘要</th>
+                                    <th scope="col">耗时</th>
+                                </tr>
+                            </thead>
+
+                            <tbody id="tool-trace-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </article>
+        </section>
+
+        <!-- 最近会话查询区。 -->
+        <aside
+            class="panel session-panel"
+            aria-labelledby="session-heading"
+        >
+            <div class="panel-heading">
+                <div>
+                    <p class="section-number">
+                        03
+                    </p>
+                    <h2 id="session-heading">
+                        最近会话
+                    </h2>
+                </div>
+
+                <button
+                    id="refresh-sessions-button"
+                    class="secondary-button"
+                    type="button"
+                >
+                    刷新
+                </button>
+            </div>
+
+            <p
+                id="session-list-status"
+                class="field-help"
+                aria-live="polite"
+            >
+                尚未加载会话
+            </p>
+
+            <ul
+                id="session-list"
+                class="session-list"
+            ></ul>
+        </aside>
+    </main>
+
+    <footer class="site-footer">
+        <p>
+            该控制台只提供只读诊断和待人工审核的建议，
+            不直接控制真实机器人。
+        </p>
+    </footer>
+</body>
+</html>

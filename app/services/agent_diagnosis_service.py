@@ -17,6 +17,7 @@
 import inspect
 import json
 import logging
+from time import perf_counter
 
 from dataclasses import (
     dataclass,
@@ -30,6 +31,15 @@ from pydantic import (
 
 from app.agent.evidence_store import (
     ConfirmedEvidenceStore,
+)
+from app.agent.request_safety_classifier import (
+    AgentRequestSafetyClassifier,
+)
+from app.agent.request_tool_policy import (
+    AgentToolPolicy,
+)
+from app.agent.progress_reducer import (
+    AgentProgressReducer,
 )
 from app.agent.vision_input_store import (
     RequestVisionInputStore,
@@ -50,8 +60,15 @@ from app.schemas.agent_diagnosis import (
 from app.schemas.agent_planning import (
     AgentToolInteraction,
 )
+from app.schemas.agent_progress import (
+    AgentProgress,
+)
 from app.schemas.agent_runtime import (
     AgentRunResult,
+)
+from app.schemas.agent_tool_policy import (
+    AGENT_READ_ONLY_TOOL_ORDER,
+    AgentToolPolicyDecision,
 )
 from app.schemas.agent_tools import (
     DraftTestCaseToolOutput,
@@ -65,6 +82,12 @@ from app.schemas.vision import (
 )
 from app.services.agent_diagnosis_report_builder import (
     build_agent_diagnosis_report_from_draft,
+)
+from app.services.diagnostic_session_builder import (
+    DiagnosticSessionBuilder,
+)
+from app.services.diagnostic_session_store import (
+    DiagnosticSessionStoreProtocol,
 )
 from app.services.vision_input import (
     VisionInputAdapter,
@@ -85,18 +108,6 @@ DEFAULT_AGENT_TASK_GOAL = (
 
 # 与AgentPlanningContext.task的最大长度保持一致。
 MAX_AGENT_TASK_LENGTH = 20_000
-
-
-# Agent生产注册表中的只读工具名称。
-#
-# 这里的顺序是稳定的展示顺序，不能由用户请求修改。
-AGENT_READ_ONLY_TOOL_ORDER = (
-    "analyze_robot_image",
-    "search_knowledge",
-    "get_robot_telemetry",
-    "draft_test_case",
-    "get_current_time",
-)
 
 
 # Planner虽然结束，但最终JSON或引用未通过校验时，
@@ -157,8 +168,11 @@ class AgentRunnerProvider(Protocol):
         allowed_tool_names: (
             frozenset[str] | None
         ) = None,
+        initial_progress: (
+            AgentProgress | None
+        ) = None,
     ) -> AgentRunResult:
-        """按当前请求的工具范围执行一次Agent循环。"""
+        """按当前请求的工具范围和初始进度运行循环。"""
 
         ...
 
@@ -195,48 +209,6 @@ def _clean_required_text(
         )
 
     return cleaned
-
-
-def determine_agent_tool_scope(
-    request: AgentDiagnosisRequest,
-    /,
-) -> frozenset[str]:
-    """根据请求是否携带图片返回结构性的只读工具范围。
-
-    本函数不再根据task_goal或analysis_goal中的关键词猜测
-    用户需要哪一种工具。除Vision以外的已注册只读工具始终
-    对Planner可见；只有请求没有图片时才排除Vision工具，
-    因为此时不存在可以合法传给该工具的image_ref。
-
-    是否真正调用知识检索、模拟遥测、草案或当前时间工具，
-    由Planner根据System Prompt和已经完成的观察决定。
-    ToolExecutor仍会执行工具注册、参数和只读风险边界校验。
-
-    返回frozenset是为了避免调用方在计算完成后原地修改
-    本次请求的工具权限集合。
-    """
-
-    if not isinstance(
-        request,
-        AgentDiagnosisRequest,
-    ):
-        raise TypeError(
-            "request必须是"
-            "AgentDiagnosisRequest"
-        )
-
-    available_tools = set(
-        AGENT_READ_ONLY_TOOL_ORDER
-    )
-
-    # 没有图片时不存在合法image_ref，因此结构性排除Vision。
-    # 该判断只读取Schema字段是否为空，不分析自然语言内容。
-    if not request.images:
-        available_tools.discard(
-            "analyze_robot_image"
-        )
-
-    return frozenset(available_tools)
 
 
 def build_agent_diagnosis_task(
@@ -1073,6 +1045,105 @@ def _make_abstained_draft(
     )
 
 
+def _align_draft_with_progress(
+    draft: AgentDiagnosisDraft,
+    progress: AgentProgress | None,
+    /,
+) -> AgentDiagnosisDraft:
+    """让最终诊断草稿服从确定性Agent进度上限。
+
+    Progress只限制一份草稿最多可以发布到什么状态，
+    不会根据工具输出自行生成原因或检查步骤。
+    """
+
+    if not isinstance(
+        draft,
+        AgentDiagnosisDraft,
+    ):
+        raise TypeError(
+            "draft必须是AgentDiagnosisDraft"
+        )
+
+    if progress is None:
+        # 兼容尚未迁移到AgentProgress的内部Runner。
+        return draft
+
+    if not isinstance(progress, AgentProgress):
+        raise TypeError(
+            "progress必须是AgentProgress或None"
+        )
+
+    if progress.state == "completed":
+        # AgentRunResult契约和_parse_final_draft()已经保证
+        # 正常完成状态与Planner草稿字段互相一致。
+        return draft
+
+    # 当所有确定性能力都已经完成，而Planner仍主动选择
+    # information不足时，Reducer会保存一条通用兜底说明，
+    # 以满足AgentProgress终止状态必须可解释的契约。
+    # 如果最终草稿已经给出了更具体的业务缺口，就不应再把
+    # 这条进度层兜底说明重复暴露给API调用方。
+    progress_missing_information = (
+        ()
+        if (
+            draft.missing_information
+            and progress.stop_reason
+            in {
+                "partial_evidence",
+                "insufficient_information",
+            }
+            and set(
+                progress.required_capabilities
+            ).issubset(
+                progress.completed_capabilities
+            )
+            and not progress.evidence_conflicts
+        )
+        else progress.missing_information
+    )
+
+    combined_missing_information = tuple(
+        dict.fromkeys(
+            (
+                *draft.missing_information,
+                *progress_missing_information,
+            )
+        )
+    )
+
+    if (
+        progress.state == "partial"
+        and not draft.abstained
+    ):
+        # Planner草稿已经包含原因或检查项时，可以保留这些
+        # 内容，但必须把状态降为partial并公开真实信息缺口。
+        draft_data = draft.model_dump(
+            mode="python"
+        )
+        draft_data.update({
+            "status": "partial",
+            "missing_information": (
+                combined_missing_information
+            ),
+            "abstained": False,
+        })
+
+        return AgentDiagnosisDraft.model_validate(
+            draft_data
+        )
+
+    # Planner已经拒答，或者Reducer要求拒答/人工审核时，
+    # 不把已有工具结果自动改写成未经Planner生成的结论。
+    if not combined_missing_information:
+        combined_missing_information = (
+            "当前进度不足以形成可信诊断结果",
+        )
+
+    return _make_abstained_draft(
+        combined_missing_information
+    )
+
+
 def _build_execution_summary(
     *,
     run_result: AgentRunResult,
@@ -1127,6 +1198,7 @@ def _build_execution_summary(
             finish_reason=None,
             step_count=len(traces),
             steps=traces,
+            progress=run_result.progress,
             missing_information=list(
                 run_result.missing_information
             ),
@@ -1155,12 +1227,91 @@ def _build_execution_summary(
         ),
         step_count=len(traces),
         steps=traces,
+        progress=run_result.progress,
 
         # task_completed草稿中该列表为空；
         # 信息不足或人工复核草稿必须解释缺什么。
         missing_information=list(
             draft.missing_information
         ),
+    )
+
+
+def _build_policy_terminated_response(
+    *,
+    request: AgentDiagnosisRequest,
+    request_id: str,
+    planner_prompt_version: str,
+    policy_decision: AgentToolPolicyDecision,
+    evidence_store: ConfirmedEvidenceStore,
+) -> AgentDiagnosisResponse:
+    """把Planner前的策略终止转换成公开拒答响应。
+
+    该函数只接受abstained或human_review_required决定。
+    它不会运行Planner、构造工具轨迹或使用未经确认的证据。
+    """
+
+    if (
+        policy_decision.disposition
+        == "continue_to_planner"
+    ):
+        raise ValueError(
+            "继续进入Planner的策略决定"
+            "不能构造提前终止响应"
+        )
+
+    # 缺图或图片无关属于信息不足；
+    # 提示注入和高风险控制则需要人工审核。
+    finish_reason = (
+        "insufficient_information"
+        if policy_decision.disposition
+        == "abstained"
+        else "human_review_required"
+    )
+
+    draft = _make_abstained_draft(
+        policy_decision.missing_information
+    )
+
+    diagnosis = (
+        build_agent_diagnosis_report_from_draft(
+            request_id=request_id,
+            request=request,
+            planner_prompt_version=(
+                planner_prompt_version
+            ),
+            draft=draft,
+            evidence_store=evidence_store,
+        )
+    )
+
+    execution = AgentExecutionSummary(
+        planner_prompt_version=(
+            planner_prompt_version
+        ),
+        state="completed",
+        termination_reason=(
+            "request_policy_finished"
+        ),
+        termination_message=(
+            policy_decision.public_message
+            or "请求级策略安全结束"
+        ),
+        finish_reason=finish_reason,
+        step_count=0,
+        steps=[],
+        missing_information=list(
+            policy_decision.missing_information
+        ),
+    )
+
+    return AgentDiagnosisResponse(
+        request_id=request_id,
+        diagnosis=diagnosis,
+        execution=execution,
+        vision_observations=[],
+        telemetry_observations=[],
+        test_case_drafts=[],
     )
 
 
@@ -1187,9 +1338,25 @@ class AgentDiagnosisService:
         vision_input_store: (
             RequestVisionInputStore
         ),
+        safety_classifier: (
+            AgentRequestSafetyClassifier
+        ),
+        tool_policy: AgentToolPolicy,
         planner_prompt_version: str,
+        session_builder: (
+            DiagnosticSessionBuilder | None
+        ) = None,
+        session_store: (
+            DiagnosticSessionStoreProtocol | None
+        ) = None,
     ) -> None:
-        """注入Runner、请求级证据Store和Prompt版本。"""
+        """注入Runner、请求级策略、Store和Prompt版本。
+
+        session_builder和session_store必须同时提供或同时省略：
+
+        - 生产依赖同时提供，使每次公开诊断都持久化；
+        - 旧单元测试可以同时省略，只测试诊断编排逻辑。
+        """
 
         runner_method = getattr(
             runner,
@@ -1236,6 +1403,60 @@ class AgentDiagnosisService:
                 "RequestVisionInputStore"
             )
 
+        if not isinstance(
+            safety_classifier,
+            AgentRequestSafetyClassifier,
+        ):
+            raise TypeError(
+                "safety_classifier必须是"
+                "AgentRequestSafetyClassifier"
+            )
+
+        if not isinstance(
+            tool_policy,
+            AgentToolPolicy,
+        ):
+            raise TypeError(
+                "tool_policy必须是"
+                "AgentToolPolicy"
+            )
+
+        if (
+            session_builder is None
+        ) != (
+            session_store is None
+        ):
+            raise ValueError(
+                "session_builder和session_store"
+                "必须同时提供或同时省略"
+            )
+
+        if (
+            session_builder is not None
+            and not isinstance(
+                session_builder,
+                DiagnosticSessionBuilder,
+            )
+        ):
+            raise TypeError(
+                "session_builder必须是"
+                "DiagnosticSessionBuilder"
+            )
+
+        if session_store is not None:
+            save_method = getattr(
+                session_store,
+                "save",
+                None,
+            )
+
+            if not inspect.iscoroutinefunction(
+                save_method
+            ):
+                raise TypeError(
+                    "session_store.save必须是异步方法"
+                )
+
         self._runner = runner
         self._evidence_store = (
             evidence_store
@@ -1246,6 +1467,14 @@ class AgentDiagnosisService:
         self._vision_input_store = (
             vision_input_store
         )
+        self._safety_classifier = (
+            safety_classifier
+        )
+        self._tool_policy = tool_policy
+        self._session_builder = (
+            session_builder
+        )
+        self._session_store = session_store
         self._planner_prompt_version = (
             _clean_required_text(
                 planner_prompt_version,
@@ -1261,17 +1490,92 @@ class AgentDiagnosisService:
         request: AgentDiagnosisRequest,
         request_id: str,
     ) -> AgentDiagnosisResponse:
+        """执行诊断，并在启用存储时统一保存脱敏会话。
+
+        公开方法只有一个返回出口，因此Planner前安全结束、
+        普通完成、部分结果、拒答和人工审核都会进入同一套
+        会话构造与持久化流程。
+        """
+
+        started_at = perf_counter()
+
+        response = await (
+            self._diagnose_without_session_recording(
+                request,
+                request_id,
+            )
+        )
+
+        # 离线旧测试可以不启用持久化；生产依赖会同时
+        # 注入Builder和Store，因此真实HTTP响应会有session_id。
+        if (
+            self._session_builder is None
+            or self._session_store is None
+        ):
+            return response
+
+        diagnosis_duration_ms = (
+            perf_counter() - started_at
+        ) * 1000.0
+
+        record = self._session_builder.build(
+            request=request,
+            response=response,
+            total_duration_ms=(
+                diagnosis_duration_ms
+            ),
+        )
+
+        # save()完成后才向客户端公开session_id。
+        # 如果写盘失败，异常会进入统一应用异常处理器，
+        # 不会返回一个实际上无法查询的虚假会话标识。
+        saved_record = await (
+            self._session_store.save(record)
+        )
+
+        if not isinstance(
+            saved_record,
+            type(record),
+        ):
+            raise TypeError(
+                "session_store.save必须返回"
+                "DiagnosticSessionRecord"
+            )
+
+        # AgentDiagnosisResponse是frozen模型，不能直接赋值。
+        # 重新通过model_validate()构造响应，可以让UUID4字段
+        # 再经过Pydantic校验，而不是绕过契约修改内部数据。
+        response_data = response.model_dump(
+            mode="python"
+        )
+        response_data["session_id"] = (
+            saved_record.session_id
+        )
+
+        return AgentDiagnosisResponse.model_validate(
+            response_data
+        )
+
+    async def _diagnose_without_session_recording(
+        self,
+        request: AgentDiagnosisRequest,
+        request_id: str,
+    ) -> AgentDiagnosisResponse:
         """执行一次完整Agent诊断并返回公开响应。
 
         流程：
 
         1. 校验请求和request_id；
-        2. 构造不可信任务JSON；
-        3. 等待AgentRunner完成；
-        4. 提取工具轨迹和观察；
-        5. 处理Runner中止或正常结束；
-        6. 进行最终证据白名单校验；
-        7. 返回AgentDiagnosisResponse。
+        2. 执行确定性安全分类；
+        3. 计算请求级最小工具集合；
+        4. 必要时在Planner前安全结束；
+        5. 验证并登记请求图片；
+        6. 构造不可信任务JSON；
+        7. 等待AgentRunner完成；
+        8. 提取工具轨迹和观察；
+        9. 处理Runner中止或正常结束；
+        10. 进行最终证据白名单校验；
+        11. 返回AgentDiagnosisResponse。
         """
 
         if not isinstance(
@@ -1291,6 +1595,53 @@ class AgentDiagnosisService:
             )
         )
 
+        # 第一层前置边界：安全分类器只回答请求是否必须
+        # 转人工审核。命中安全规则后不解码图片、不调用
+        # Planner，也不执行任何工具。
+        policy_decision = (
+            self._safety_classifier.classify(
+                request
+            )
+        )
+
+        if policy_decision is not None:
+            return _build_policy_terminated_response(
+                request=request,
+                request_id=cleaned_request_id,
+                planner_prompt_version=(
+                    self._planner_prompt_version
+                ),
+                policy_decision=policy_decision,
+                evidence_store=(
+                    self._evidence_store
+                ),
+            )
+
+        # 第二层前置边界：只有通过安全分类的请求才计算
+        # 业务能力和最小工具集合。缺少必要图片或图片明显
+        # 无关时同样在Planner之前结束。
+        policy_decision = (
+            self._tool_policy.decide(
+                request
+            )
+        )
+
+        if (
+            policy_decision.disposition
+            != "continue_to_planner"
+        ):
+            return _build_policy_terminated_response(
+                request=request,
+                request_id=cleaned_request_id,
+                planner_prompt_version=(
+                    self._planner_prompt_version
+                ),
+                policy_decision=policy_decision,
+                evidence_store=(
+                    self._evidence_store
+                ),
+            )
+
         prepared_images = (
             _prepare_request_images(
                 request=request,
@@ -1305,23 +1656,14 @@ class AgentDiagnosisService:
             )
         )
 
-        # 根据请求是否携带图片计算结构性只读工具范围。
-        #
-        # 这里不再通过task_goal关键词猜测工具需求：除Vision外
-        # 的注册只读工具保持可见；无图片时排除Vision。Planner
-        # 负责选择真正必要的工具，Executor仍执行最终安全校验。
-        structural_tool_names = (
-            determine_agent_tool_scope(
-                request
-            )
-        )
-
-        # 结构性范围描述“这一类请求可以使用什么”，Runner快照
-        # 描述“当前实例真正注册了什么”。二者取交集可以兼容只
-        # 装配部分工具的测试或部署，并且不会放宽任何权限。
-        # 这个交集只读取工具名集合，不读取task_goal关键词。
+        # 策略结果描述“本次任务真正需要什么”，Runner快照
+        # 描述“当前实例真正注册了什么”。二者取交集不会放宽
+        # 任意一方的权限，并且兼容只装配部分工具的部署。
         allowed_tool_names = (
-            structural_tool_names
+            frozenset(
+                policy_decision
+                .allowed_tool_names
+            )
             & self._runner.registered_tool_names
         )
 
@@ -1352,6 +1694,16 @@ class AgentDiagnosisService:
             # 并要求Executor再次检查模型实际返回的工具名。
             allowed_tool_names=(
                 allowed_tool_names
+            ),
+
+            # Progress只根据通过安全分类和工具策略校验的
+            # policy_decision创建。Runner后续只收窄它，不能
+            # 扩大本次请求的必要能力或工具权限。
+            initial_progress=(
+                AgentProgressReducer()
+                .create_initial_progress(
+                    policy_decision
+                )
             ),
         )
 
@@ -1428,6 +1780,13 @@ class AgentDiagnosisService:
                 # 校验LLM诊断草稿JSON和结束状态。
                 draft = _parse_final_draft(
                     run_result
+                )
+
+                # Planner草稿通过结构校验后，还必须服从
+                # Python Reducer根据真实工具结果计算的状态。
+                draft = _align_draft_with_progress(
+                    draft,
+                    run_result.progress,
                 )
 
                 # 第二道最终边界：

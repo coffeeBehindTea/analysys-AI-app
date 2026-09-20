@@ -15,11 +15,12 @@
   },
   "response": {
     "request_id": "offline-multimodal-agent-024",
+    "session_id": null,
     "diagnosis": {
       "request_id": "offline-multimodal-agent-024",
       "prompt_version": "offline-agent-tool-calling-v1",
       "gate_version": "agent-confirmed-evidence-v1",
-      "status": "abstained",
+      "status": "human_review_required",
       "symptoms": [
         {
           "description": "图片与日志记录的电量和速度不一致",
@@ -38,7 +39,7 @@
         "现有来源存在冲突或请求涉及高风险操作，需要人工复核",
         "当前结果需要具备权限和资质的人员复核"
       ],
-      "abstained": true
+      "abstained": false
     },
     "execution": {
       "planner_prompt_version": "offline-agent-tool-calling-v1",
@@ -55,7 +56,7 @@
           "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
           "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
           "status": "success",
-          "duration_ms": 0.09920000002239249,
+          "duration_ms": 0.18929999987449264,
           "error_code": null
         },
         {
@@ -65,7 +66,7 @@
           "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
           "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
           "status": "success",
-          "duration_ms": 0.03370000013092067,
+          "duration_ms": 0.08400000024266774,
           "error_code": null
         }
       ],
@@ -204,7 +205,7 @@
     "actual_execution_state": "completed",
     "actual_termination_reason": "planner_finished",
     "actual_finish_reason": "human_review_required",
-    "actual_diagnosis_status": "abstained",
+    "actual_diagnosis_status": "human_review_required",
     "step_count": 2,
     "citation_evaluations": [],
     "expected_evidence": [],
@@ -273,7 +274,7 @@
         "failure_reason": null
       }
     ],
-    "latency_ms": 6.6467999999986205,
+    "latency_ms": 7.90210000013758,
     "cost_status": "unavailable",
     "estimated_cost_usd": null,
     "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",

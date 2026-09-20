@@ -262,6 +262,58 @@ def test_first_planning_context_has_empty_history(
     assert context.state == "planning"
     assert context.next_step == 1
     assert context.interactions == ()
+    assert context.must_attempt_tool_names == ()
+
+
+def test_context_accepts_unique_unattempted_required_tools(
+) -> None:
+    """规划上下文可以声明本轮必须首次尝试的工具。
+
+    被测试模块是AgentPlanningContext（当前修改契约）。测试
+    直接构造首轮上下文，并提供两个合法、互不重复的工具名。
+    预期Pydantic保留稳定顺序，供Runner传给Planner Provider
+    决定是否使用强制Tool Calling。
+    """
+
+    context = AgentPlanningContext(
+        task="核对规则和当前模拟状态",
+        next_step=1,
+        must_attempt_tool_names=(
+            "search_knowledge",
+            "get_robot_telemetry",
+        ),
+    )
+
+    assert context.must_attempt_tool_names == (
+        "search_knowledge",
+        "get_robot_telemetry",
+    )
+
+
+def test_context_rejects_already_attempted_required_tool(
+) -> None:
+    """已经执行过的工具不能再次标记为首次必需尝试。
+
+    被测试模块是AgentPlanningContext的跨字段校验。测试把
+    search_knowledge同时放入历史和must_attempt_tool_names；
+    预期Pydantic拒绝矛盾状态，避免Provider被要求重复执行
+    已经获得过真实结果的工具。
+    """
+
+    with pytest.raises(
+        ValidationError,
+        match="不能包含已经尝试的工具",
+    ):
+        AgentPlanningContext(
+            task="测试矛盾的首次尝试状态",
+            next_step=2,
+            interactions=(
+                make_interaction(),
+            ),
+            must_attempt_tool_names=(
+                "search_knowledge",
+            ),
+        )
 
 
 def test_context_accepts_continuous_history_and_next_step(

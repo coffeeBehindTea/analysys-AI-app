@@ -307,6 +307,35 @@ select:focus-visible,
     text-align: right;
 }
 
+.result-heading-actions {
+    display: grid;
+    justify-items: end;
+    gap: 0.55rem;
+}
+
+.result-heading-actions > p {
+    margin: 0;
+
+    color: var(--color-text-muted);
+
+    font-size: 0.82rem;
+    text-align: right;
+}
+
+.export-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.45rem;
+}
+
+.compact-button {
+    min-height: 2rem;
+    padding: 0.35rem 0.65rem;
+
+    font-size: 0.76rem;
+}
+
 .section-number {
     margin: 0 0 0.15rem;
 
@@ -523,6 +552,82 @@ select:focus-visible,
         );
 
     animation: loading-sweep 1.2s linear infinite;
+}
+
+
+/* =========================================================
+   SSE实时执行状态
+   ========================================================= */
+
+.stream-progress {
+    margin: 1.25rem;
+    padding: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-medium);
+
+    background: var(--color-surface-muted);
+}
+
+.stream-progress-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.stream-progress-heading h3,
+.stream-progress-heading p {
+    margin: 0;
+}
+
+.stream-progress-heading p {
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+}
+
+.stream-event-list {
+    display: grid;
+    gap: 0.55rem;
+
+    margin: 0.9rem 0 0;
+    padding: 0;
+
+    list-style: none;
+}
+
+.stream-event-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.25rem 0.65rem;
+
+    padding: 0.65rem 0.75rem;
+    border-left: 3px solid var(--color-primary);
+    border-radius: var(--radius-small);
+
+    background: #ffffff;
+}
+
+.stream-event-sequence {
+    grid-row: 1 / span 2;
+
+    color: var(--color-primary);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 800;
+}
+
+.stream-event-type {
+    color: var(--color-heading);
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.stream-event-message {
+    color: var(--color-text-muted);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
 }
 
 @keyframes loading-sweep {
@@ -926,6 +1031,18 @@ td code {
         max-width: none;
 
         text-align: left;
+    }
+
+    .result-heading-actions {
+        justify-items: start;
+    }
+
+    .result-heading-actions > p {
+        text-align: left;
+    }
+
+    .export-actions {
+        justify-content: flex-start;
     }
 
     .summary-grid {

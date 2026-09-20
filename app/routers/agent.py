@@ -2,16 +2,20 @@
 
 本模块负责：
 
-1. 声明POST /api/v1/agent/diagnose；
+1. 声明普通JSON与SSE流式诊断接口；
 2. 让FastAPI校验AgentDiagnosisRequest请求体；
-3. 通过依赖注入取得AgentDiagnosisService；
+3. 通过依赖注入取得普通或流式诊断Service；
 4. 从Request.state读取Middleware生成的request_id；
-5. 调用Service并返回AgentDiagnosisResponse。
+5. 普通接口返回AgentDiagnosisResponse；
+6. 流式接口逐条编码并发送公开Agent事件。
 
 本模块不调用LLM、不执行工具、不访问知识库，
 也不构造最终诊断报告。
 """
 
+from collections.abc import (
+    AsyncIterator,
+)
 from typing import (
     Annotated,
 )
@@ -21,9 +25,13 @@ from fastapi import (
     Depends,
     Request,
 )
+from fastapi.responses import (
+    StreamingResponse,
+)
 
 from app.dependencies import (
     get_agent_diagnosis_service,
+    get_agent_diagnosis_streaming_service,
 )
 from app.schemas.agent_api import (
     AgentDiagnosisRequest,
@@ -34,6 +42,14 @@ from app.schemas.error import (
 )
 from app.services.agent_diagnosis_service import (
     AgentDiagnosisService,
+)
+from app.services.agent_diagnosis_streaming_service import (
+    AgentDiagnosisStreamingService,
+)
+from app.services.agent_sse_encoder import (
+    AGENT_SSE_CACHE_CONTROL,
+    AGENT_SSE_CONTENT_TYPE,
+    encode_agent_sse_event,
 )
 
 
@@ -140,4 +156,102 @@ async def diagnose_with_agent(
     return await service.diagnose(
         payload,
         request_id=request_id,
+    )
+
+
+async def _encode_agent_diagnosis_stream(
+    *,
+    payload: AgentDiagnosisRequest,
+    request_id: str,
+    service: AgentDiagnosisStreamingService,
+) -> AsyncIterator[str]:
+    """把结构化Agent事件逐条转换成SSE文本帧。
+
+    StreamingResponse会使用async for消费本异步生成器。
+    客户端断开连接时，Starlette会关闭这个生成器；
+    关闭动作继续传递给流式Service，由它取消后台诊断任务。
+    """
+
+    async for event in service.stream(
+        payload,
+        request_id,
+    ):
+        # 编码器统一生成id、event和data字段，
+        # 并在每个事件末尾添加一个空行作为SSE帧边界。
+        yield encode_agent_sse_event(event)
+
+
+@router.post(
+    "/diagnose/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": (
+                "按执行顺序返回Robot Diagnostic "
+                "Agent公开SSE事件"
+            ),
+            "content": {
+                "text/event-stream": {
+                    "schema": {
+                        "type": "string",
+                    },
+                },
+            },
+        },
+        502: {
+            "model": ErrorResponse,
+            "description": (
+                "事件流开始前，上游服务返回错误"
+            ),
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": (
+                "事件流开始前，必要配置或服务不可用"
+            ),
+        },
+        504: {
+            "model": ErrorResponse,
+            "description": (
+                "事件流开始前，上游服务响应超时"
+            ),
+        },
+    },
+)
+async def diagnose_with_agent_stream(
+    payload: AgentDiagnosisRequest,
+    http_request: Request,
+    service: Annotated[
+        AgentDiagnosisStreamingService,
+        Depends(
+            get_agent_diagnosis_streaming_service
+        ),
+    ],
+) -> StreamingResponse:
+    """启动一次诊断并以SSE持续返回公开执行事件。"""
+
+    request_id = (
+        http_request.state.request_id
+    )
+
+    # StreamingResponse不会在这里一次性等待完整诊断。
+    # ASGI服务器开始响应后，会逐条消费body_iterator，
+    # 每产生一个字符串就立即向客户端发送一个SSE事件。
+    return StreamingResponse(
+        _encode_agent_diagnosis_stream(
+            payload=payload,
+            request_id=request_id,
+            service=service,
+        ),
+        media_type=AGENT_SSE_CONTENT_TYPE,
+        headers={
+            # 禁止浏览器或中间代理缓存旧事件。
+            "Cache-Control": (
+                AGENT_SSE_CACHE_CONTROL
+            ),
+
+            # Nginx识别此响应头后不会聚合多个事件，
+            # 能保持工具开始/结束等事件及时到达客户端。
+            "X-Accel-Buffering": "no",
+        },
     )

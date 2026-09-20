@@ -26,6 +26,7 @@ from pydantic import (
 from app.schemas.agent import (
     ToolCall,
     ToolExecutionResult,
+    ToolName,
 )
 
 
@@ -157,6 +158,18 @@ class AgentPlanningContext(BaseModel):
         ),
     )
 
+    must_attempt_tool_names: tuple[
+        ToolName,
+        ...,
+    ] = Field(
+        default_factory=tuple,
+        max_length=20,
+        description=(
+            "当前轮结束前至少需要尝试一次的工具；"
+            "由Runner根据请求级必需能力和真实历史计算"
+        ),
+    )
+
     @model_validator(mode="after")
     def history_must_be_continuous(
         self,
@@ -201,6 +214,28 @@ class AgentPlanningContext(BaseModel):
         ):
             raise ValueError(
                 "interactions不能包含重复call_id"
+            )
+
+        if len(
+            self.must_attempt_tool_names
+        ) != len(set(
+            self.must_attempt_tool_names
+        )):
+            raise ValueError(
+                "must_attempt_tool_names不能重复"
+            )
+
+        attempted_tool_names = {
+            interaction.tool_call.tool_name
+            for interaction in self.interactions
+        }
+
+        if attempted_tool_names.intersection(
+            self.must_attempt_tool_names
+        ):
+            raise ValueError(
+                "must_attempt_tool_names"
+                "不能包含已经尝试的工具"
             )
 
         return self

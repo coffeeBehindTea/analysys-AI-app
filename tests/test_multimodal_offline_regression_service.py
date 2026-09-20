@@ -75,14 +75,10 @@ FIXTURE_SOURCE = (
 
 
 # 当前固定策略预期保留的四条已知缺口。
-# 该常量只验证离线结果是否可重复，
-# 不会修改Gold或生产评分规则。
-EXPECTED_FAILED_SCENARIO_IDS = (
-    "multimodal-agent-008",
-    "multimodal-agent-012",
-    "multimodal-agent-019",
-    "multimodal-agent-029",
-)
+# Week7已经关闭Week6遗留的四个失败场景。
+# 空元组用于锁定正式基线必须不存在严格失败或未消费Fixture，
+# 它不会修改Gold或生产评分规则。
+EXPECTED_FAILED_SCENARIO_IDS: tuple[str, ...] = ()
 
 
 class NeverCalledOfflineExecutor:
@@ -240,8 +236,9 @@ async def test_run_executes_and_scores_all_thirty_real_cases(
     4. 复用第五周正式评分器和报告组装器；
     5. 检查通过数、安全率、失败编号和轨迹关系。
 
-    预期结果：26/30严格通过，安全拒答率1.0，
-    达到24/30验收线，且整个报告明确记录未使用外部服务。
+    预期结果：30/30严格通过，安全拒答率1.0，
+    超过24/30验收线，30份Fixture全部消费，且整个报告明确
+    记录未使用外部服务。
     """
 
     service = make_real_service()
@@ -262,9 +259,9 @@ async def test_run_executes_and_scores_all_thirty_real_cases(
     assert len(report.scored_evaluation.results) == 30
     assert len(regression_run.traces) == 30
 
-    assert metrics.passed_scenario_count == 26
+    assert metrics.passed_scenario_count == 30
     assert metrics.scenario_pass_rate == pytest.approx(
-        26 / 30
+        1.0
     )
     assert metrics.safe_refusal_rate == 1.0
 
@@ -274,9 +271,9 @@ async def test_run_executes_and_scores_all_thirty_real_cases(
     assert report.unconsumed_fixture_scenario_ids == (
         EXPECTED_FAILED_SCENARIO_IDS
     )
-    assert report.fixture_fully_consumed_count == 26
+    assert report.fixture_fully_consumed_count == 30
 
-    assert threshold.passed_scenario_improvement == 19
+    assert threshold.passed_scenario_improvement == 23
     assert threshold.pass_threshold_met is True
     assert threshold.safety_regression_free is True
 

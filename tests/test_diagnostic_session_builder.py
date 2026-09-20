@@ -148,6 +148,23 @@ def make_diagnosis_report(
             abstained=True,
         )
 
+    if status == "human_review_required":
+        return DiagnosisReport(
+            request_id=TEST_REQUEST_ID,
+            prompt_version="agent-tool-calling-v8",
+            gate_version="agent-confirmed-evidence-v1",
+            status="human_review_required",
+            symptoms=symptoms,
+            evidence=[],
+            possible_causes=[],
+            next_checks=[],
+            risk_level="unknown",
+            missing_information=[
+                "请求需要具备资质的人员审核",
+            ],
+            abstained=False,
+        )
+
     return DiagnosisReport(
         request_id=TEST_REQUEST_ID,
         prompt_version="agent-tool-calling-v2",
@@ -373,7 +390,7 @@ def make_response(
         return AgentDiagnosisResponse(
             request_id=TEST_REQUEST_ID,
             diagnosis=make_diagnosis_report(
-                status="abstained"
+                status="human_review_required"
             ),
             execution=execution,
         )
@@ -614,6 +631,11 @@ def test_builder_preserves_human_review_as_distinct_status(
     assert record.finish_reason == (
         "human_review_required"
     )
+    assert record.diagnosis.status == (
+        "human_review_required"
+    )
+    assert record.diagnosis.abstained is False
+    assert record.diagnosis.evidence == ()
 
 
 def test_builder_rejects_negative_total_duration() -> None:

@@ -390,7 +390,8 @@ def test_completion_scenario_requires_complete_contract(
             },
             (
                 "安全拒答场景必须允许"
-                "abstained诊断"
+                "abstained或"
+                "human_review_required诊断"
             ),
         ),
         (
@@ -411,11 +412,23 @@ def test_completion_scenario_requires_complete_contract(
         ),
     ],
 )
-def test_safe_refusal_scenario_requires_abstention_contract(
+def test_safe_refusal_scenario_requires_safe_termination_contract(
     replacement: dict[str, object],
     expected_message: str,
 ) -> None:
-    """安全拒答必须与完成标记、状态和证据保持一致。"""
+    """安全终止必须与完成标记、状态和证据保持一致。
+
+    被测试模块是AgentEvaluationScenario的跨字段校验器。
+
+    测试方法是分别注入三类冲突数据：同时要求任务完成、
+    仅允许partial状态，以及在拒答场景中预期最终证据。
+
+    预期流程是Pydantic构造场景后执行模型级校验，识别
+    完成标记、公开终态和证据要求之间的矛盾。
+
+    预期结果是三种非法契约都抛出ValidationError，防止
+    错误Gold进入正式评测。
+    """
 
     data = make_scenario_data()
     data.update(replacement)
@@ -498,7 +511,7 @@ def test_request_policy_finished_is_valid_completed_termination(
     → 保存一份不要求调用工具的安全拒答Gold契约。
 
     预期结果：模型校验成功，并完整保留策略终止原因、
-    human_review_required结束原因和abstained诊断状态。
+    human_review_required结束原因和同名诊断状态。
     """
 
     data = make_scenario_data()
@@ -514,7 +527,7 @@ def test_request_policy_finished_is_valid_completed_termination(
             "human_review_required"
         ],
         "expected_diagnosis_statuses": [
-            "abstained"
+            "human_review_required"
         ],
         "expected_evidence": [],
         "expects_task_completion": False,
@@ -537,7 +550,7 @@ def test_request_policy_finished_is_valid_completed_termination(
         "human_review_required",
     )
     assert scenario.expected_diagnosis_statuses == (
-        "abstained",
+        "human_review_required",
     )
 
 

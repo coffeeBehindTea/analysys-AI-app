@@ -40,6 +40,7 @@ from app.agent.runner import (
 from app.schemas.agent import (
     ToolCall,
     ToolDefinition,
+    ToolExecutionResult,
 )
 from app.schemas.agent_planning import (
     AgentPlannerDecision,
@@ -47,6 +48,9 @@ from app.schemas.agent_planning import (
 )
 from app.schemas.agent_tool_policy import (
     AgentToolPolicyDecision,
+)
+from app.schemas.agent_progress import (
+    AgentProgress,
 )
 from app.schemas.agent_tools import (
     SearchKnowledgeToolOutput,
@@ -197,6 +201,159 @@ class FailingPlanner:
         )
 
 
+class RecordingRunObserver:
+    """记录Runner四类实时通知的异步Fake观察者。"""
+
+    def __init__(self) -> None:
+        self.events: list[
+            tuple[str, object]
+        ] = []
+
+    async def on_planning_started(
+        self,
+        *,
+        step_number: int,
+        allowed_tool_names: tuple[
+            str,
+            ...,
+        ],
+    ) -> None:
+        """保存规划步骤号和本轮可见工具名。"""
+
+        self.events.append((
+            "planning_started",
+            (
+                step_number,
+                allowed_tool_names,
+            ),
+        ))
+
+    async def on_tool_started(
+        self,
+        *,
+        step_id: int,
+        tool_call: ToolCall,
+    ) -> None:
+        """保存工具开始时的独立ToolCall副本。"""
+
+        self.events.append((
+            "tool_started",
+            (
+                step_id,
+                tool_call.model_copy(
+                    deep=True
+                ),
+            ),
+        ))
+
+    async def on_tool_finished(
+        self,
+        *,
+        step_id: int,
+        tool_call: ToolCall,
+        result: ToolExecutionResult,
+    ) -> None:
+        """保存同一步工具调用和执行结果。"""
+
+        self.events.append((
+            "tool_finished",
+            (
+                step_id,
+                tool_call.model_copy(
+                    deep=True
+                ),
+                result.model_copy(
+                    deep=True
+                ),
+            ),
+        ))
+
+    async def on_progress_updated(
+        self,
+        *,
+        progress: AgentProgress,
+    ) -> None:
+        """保存Reducer产生的权威进度副本。"""
+
+        self.events.append((
+            "progress_updated",
+            progress.model_copy(
+                deep=True
+            ),
+        ))
+
+
+class MutatingRunObserver(
+    RecordingRunObserver
+):
+    """故意修改收到对象的防御性复制测试观察者。"""
+
+    async def on_tool_started(
+        self,
+        *,
+        step_id: int,
+        tool_call: ToolCall,
+    ) -> None:
+        """修改观察者收到的arguments后再记录通知。"""
+
+        tool_call.arguments[
+            "query"
+        ] = "observer-mutated-query"
+
+        await super().on_tool_started(
+            step_id=step_id,
+            tool_call=tool_call,
+        )
+
+    async def on_tool_finished(
+        self,
+        *,
+        step_id: int,
+        tool_call: ToolCall,
+        result: ToolExecutionResult,
+    ) -> None:
+        """修改观察者收到的结果字典后再记录通知。"""
+
+        if result.output is not None:
+            result.output[
+                "citations"
+            ] = []
+
+        await super().on_tool_finished(
+            step_id=step_id,
+            tool_call=tool_call,
+            result=result,
+        )
+
+
+class SyncRunObserver:
+    """四个通知都错误使用普通def实现的无效观察者。"""
+
+    def on_planning_started(
+        self,
+        **kwargs: object,
+    ) -> None:
+        del kwargs
+
+    def on_tool_started(
+        self,
+        **kwargs: object,
+    ) -> None:
+        del kwargs
+
+    def on_tool_finished(
+        self,
+        **kwargs: object,
+    ) -> None:
+        del kwargs
+
+    def on_progress_updated(
+        self,
+        **kwargs: object,
+    ) -> None:
+        del kwargs
+
+
 def make_policy(
 ) -> AgentToolPolicyDecision:
     """创建只需要知识证据的请求级工具策略。"""
@@ -288,6 +445,179 @@ def make_executor(
 
 
 @pytest.mark.asyncio
+async def test_runner_notifies_observer_in_real_execution_order(
+) -> None:
+    """观察者应收到规划、工具、进度和最终规划的真实顺序。
+
+    被测试模块是AgentRunner.run()（当前修改模块）。Fake Planner
+    先请求一次知识检索，再形成最终结果；真实ToolExecutor执行
+    Fake Handler，真实Reducer处理引用。预期观察者依次收到：
+
+    planning_started → tool_started → tool_finished
+    → progress_updated → planning_started。
+
+    第二轮可用工具应为空，证明通知反映Reducer收窄后的范围。
+    """
+
+    handler = SuccessfulKnowledgeHandler()
+    observer = RecordingRunObserver()
+    planner = ScriptedProgressPlanner(
+        decisions=(
+            make_tool_decision(
+                call_id="call_observed",
+                query="ERR-NET-4001",
+            ),
+            make_finish_decision(),
+        ),
+    )
+    runner = AgentRunner(
+        planner=planner,
+        executor=make_executor(handler),
+    )
+
+    result = await runner.run(
+        "核对网络恢复规则",
+        allowed_tool_names=frozenset({
+            "search_knowledge",
+        }),
+        initial_progress=(
+            make_initial_progress()
+        ),
+        observer=observer,
+    )
+
+    assert result.state == "completed"
+    assert handler.call_count == 1
+    assert [
+        event_name
+        for event_name, _
+        in observer.events
+    ] == [
+        "planning_started",
+        "tool_started",
+        "tool_finished",
+        "progress_updated",
+        "planning_started",
+    ]
+
+    first_planning_data = (
+        observer.events[0][1]
+    )
+    assert first_planning_data == (
+        1,
+        ("search_knowledge",),
+    )
+
+    progress = observer.events[3][1]
+    assert isinstance(
+        progress,
+        AgentProgress,
+    )
+    assert progress.state == (
+        "ready_to_finish"
+    )
+    assert progress.covered_evidence_ids == (
+        TEST_CHUNK_ID,
+    )
+
+    second_planning_data = (
+        observer.events[4][1]
+    )
+    assert second_planning_data == (
+        2,
+        (),
+    )
+
+
+@pytest.mark.asyncio
+async def test_observer_cannot_mutate_runner_tool_history(
+) -> None:
+    """观察者修改收到的副本不能污染Runner权威结果。
+
+    被测试模块是AgentRunner传给观察者前执行的deep=True复制。
+    MutatingRunObserver故意修改查询和工具输出。预期Executor仍
+    接收原查询，最终Interaction仍保留原参数和真实知识引用。
+    """
+
+    handler = SuccessfulKnowledgeHandler()
+    observer = MutatingRunObserver()
+    planner = ScriptedProgressPlanner(
+        decisions=(
+            make_tool_decision(
+                call_id="call_mutating_observer",
+                query="ERR-NET-4001",
+            ),
+            make_finish_decision(),
+        ),
+    )
+    runner = AgentRunner(
+        planner=planner,
+        executor=make_executor(handler),
+    )
+
+    result = await runner.run(
+        "核对网络恢复规则",
+        allowed_tool_names=frozenset({
+            "search_knowledge",
+        }),
+        initial_progress=(
+            make_initial_progress()
+        ),
+        observer=observer,
+    )
+
+    interaction = result.interactions[0]
+
+    assert interaction.tool_call.arguments == {
+        "query": "ERR-NET-4001",
+    }
+    assert interaction.result.output is not None
+    assert len(
+        interaction.result.output[
+            "citations"
+        ]
+    ) == 1
+    assert result.progress is not None
+    assert result.progress.covered_evidence_ids == (
+        TEST_CHUNK_ID,
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_synchronous_observer_before_planning(
+) -> None:
+    """同步观察者应在Planner和Executor运行前被拒绝。
+
+    被测试模块是AgentRunner.run()入口的观察者协议检查。
+    预期抛出TypeError，Fake Planner没有Context，Fake Handler
+    调用次数为零，因此无效扩展不能产生部分业务副作用。
+    """
+
+    handler = SuccessfulKnowledgeHandler()
+    planner = ScriptedProgressPlanner(
+        decisions=(
+            make_finish_decision(),
+        ),
+    )
+    runner = AgentRunner(
+        planner=planner,
+        executor=make_executor(handler),
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="observer必须提供以下异步方法",
+    ):
+        await runner.run(
+            "核对网络恢复规则",
+            observer=SyncRunObserver(),
+        )
+
+    assert planner.contexts == []
+    assert handler.call_count == 0
+
+
+@pytest.mark.asyncio
 async def test_runner_records_success_and_finishes_progress() -> None:
     """成功工具结果应形成completed最终进度。
 
@@ -343,6 +673,16 @@ async def test_runner_records_success_and_finishes_progress() -> None:
         "search_knowledge"
     }
     assert planner.tool_schemas_seen[1] == ()
+    assert (
+        planner.contexts[0]
+        .must_attempt_tool_names
+    ) == (
+        "search_knowledge",
+    )
+    assert (
+        planner.contexts[1]
+        .must_attempt_tool_names
+    ) == ()
 
 
 @pytest.mark.asyncio

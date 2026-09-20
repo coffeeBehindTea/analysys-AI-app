@@ -71,7 +71,8 @@ class AgentDiagnosisDraft(BaseModel):
 
     status: DiagnosisStatus = Field(
         description=(
-            "当前诊断是完整、部分完成还是拒答"
+            "当前诊断是完整、部分完成、拒答"
+            "还是需要人工审核"
         ),
     )
 
@@ -208,6 +209,19 @@ class AgentDiagnosisDraft(BaseModel):
                 raise ValueError(
                     "拒答草稿的risk_level"
                     "必须是unknown"
+                )
+
+            return self
+
+        if self.status == "human_review_required":
+            # Planner可以在尚未形成知识库结论时，
+            # 根据确定性安全策略结束为人工审核。
+            # 因此该状态不强制产生原因或检查项，
+            # 但必须公开说明为什么不能继续自动处理。
+            if not self.missing_information:
+                raise ValueError(
+                    "human_review_required草稿必须说明"
+                    "需要人工审核的原因"
                 )
 
             return self

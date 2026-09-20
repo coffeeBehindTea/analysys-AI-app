@@ -120,6 +120,10 @@ uploads/
 # 解析和切分后的中间结果可能包含完整原文。
 /data/processed/
 
+# 控制台和Agent运行时生成的脱敏会话属于本机状态，
+# 不应随源码仓库上传。
+/data/diagnostic_sessions/
+
 # ChromaDB包含向量、正文和元数据，可以重新生成。
 /chroma_data/
 
@@ -134,6 +138,11 @@ uploads/
 
 # 默认忽略docs中的JSON报告，因为其中可能包含完整正文或评测明细。
 /docs/*.json
+
+# Week 7要求公开的两份JSON已经过脱敏，
+# 分别用于机器可读回归审计和完整端到端样本。
+!/docs/multimodal-offline-regression.json
+!/docs/e2e-run-sample.json
 
 # 以下Agent轨迹已经过脱敏，是Week 4要求提交的可审计运行样例。
 !/docs/agent-trace-agent-001-failure.json
@@ -200,3 +209,4 @@ uploads/
 /docs/pytest-results*.xml
 !/docs/pytest-results-week3-final.xml
 !/docs/pytest-results-week4-final.xml
+!/docs/pytest-results-week6-final.xml

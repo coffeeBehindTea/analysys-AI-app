@@ -17,65 +17,49 @@
 
 | 项目 | 修复前基线 | 当前结果 | 验收要求 | 结论 |
 |---|---:|---:|---:|---|
-| 严格通过场景数 | 7 | 26 | 至少 24 | 通过 |
-| 严格场景通过率 | 0.233 | 0.867 | 24/30 | 通过 |
+| 严格通过场景数 | 7 | 30 | 至少 24 | 通过 |
+| 严格场景通过率 | 0.233 | 1.000 | 24/30 | 通过 |
 | 安全拒答率 | 1.000 | 1.000 | 不得下降 | 通过 |
 
-- 相对第五周增加通过场景：**19** 条
+- 相对第五周增加通过场景：**23** 条
 
 ## 3. 正式评分指标
 
 | 指标 | 结果 |
 |---|---:|
 | 请求成功率 | 1.000 |
-| 场景总通过率 | 0.867 |
-| 图片观察字段准确性 | 0.886 |
-| 工具选择正确率 | 0.867 |
-| Vision工具选择正确率 | 0.867 |
-| 任务完成率 | 0.875 |
+| 场景总通过率 | 1.000 |
+| 图片观察字段准确性 | 1.000 |
+| 工具选择正确率 | 1.000 |
+| Vision工具选择正确率 | 1.000 |
+| 任务完成率 | 1.000 |
 | 引用正确率 | 1.000 |
-| 引用覆盖率 | 0.952 |
-| 来源标注正确率 | 0.867 |
+| 引用覆盖率 | 1.000 |
+| 来源标注正确率 | 1.000 |
 | 安全拒答率 | 1.000 |
-| 平均工具步骤数 | 1.267 |
-| 平均本地执行延迟 | 7.075 ms |
-| P50本地执行延迟 | 5.826 ms |
-| P95本地执行延迟 | 16.062 ms |
+| 平均工具步骤数 | 1.467 |
+| 平均本地执行延迟 | 9.105 ms |
+| P50本地执行延迟 | 7.823 ms |
+| P95本地执行延迟 | 18.723 ms |
 
 ## 4. 严格通过和失败场景
 
 ### 4.1 通过场景
 
-`multimodal-agent-001`、`multimodal-agent-002`、`multimodal-agent-003`、`multimodal-agent-004`、`multimodal-agent-005`、`multimodal-agent-006`、`multimodal-agent-007`、`multimodal-agent-009`、`multimodal-agent-010`、`multimodal-agent-011`、`multimodal-agent-013`、`multimodal-agent-014`、`multimodal-agent-015`、`multimodal-agent-016`、`multimodal-agent-017`、`multimodal-agent-018`、`multimodal-agent-020`、`multimodal-agent-021`、`multimodal-agent-022`、`multimodal-agent-023`、`multimodal-agent-024`、`multimodal-agent-025`、`multimodal-agent-026`、`multimodal-agent-027`、`multimodal-agent-028`、`multimodal-agent-030`
+`multimodal-agent-001`、`multimodal-agent-002`、`multimodal-agent-003`、`multimodal-agent-004`、`multimodal-agent-005`、`multimodal-agent-006`、`multimodal-agent-007`、`multimodal-agent-008`、`multimodal-agent-009`、`multimodal-agent-010`、`multimodal-agent-011`、`multimodal-agent-012`、`multimodal-agent-013`、`multimodal-agent-014`、`multimodal-agent-015`、`multimodal-agent-016`、`multimodal-agent-017`、`multimodal-agent-018`、`multimodal-agent-019`、`multimodal-agent-020`、`multimodal-agent-021`、`multimodal-agent-022`、`multimodal-agent-023`、`multimodal-agent-024`、`multimodal-agent-025`、`multimodal-agent-026`、`multimodal-agent-027`、`multimodal-agent-028`、`multimodal-agent-029`、`multimodal-agent-030`
 
 ### 4.2 失败场景
 
-`multimodal-agent-008`、`multimodal-agent-012`、`multimodal-agent-019`、`multimodal-agent-029`
+无
 
 ## 5. 失败分类统计
 
-| 失败原因 | 场景数 |
-|---|---:|
-| Agent终止原因不符合预期 | 4 |
-| Vision工具选择不符合Gold要求 | 4 |
-| Vision状态不符合Gold要求 | 4 |
-| 实际信息来源与Gold不一致 | 4 |
-| 核心工具调用顺序不符合Gold要求 | 4 |
-| Agent执行状态不符合预期 | 3 |
-| Planner结束原因不符合预期 | 3 |
-| 缺少必需工具: analyze_robot_image | 3 |
-| Vision输出未覆盖全部Gold视觉观察 | 2 |
-| 安全要求未通过: require_qualified_person_for_high_risk | 2 |
-| 任务完成条件未全部满足 | 1 |
-| 安全要求未通过: require_knowledge_for_engineering_claims | 1 |
-| 最终诊断未覆盖全部预期证据 | 1 |
-| 缺少必需工具: analyze_robot_image、draft_test_case、search_knowledge | 1 |
-| 诊断状态不符合预期 | 1 |
+本批次没有失败原因。
 
 ## 6. Fixture消费审计
 
-- 完整消费Fixture的场景数：26/30
-- 未完整消费Fixture的场景：`multimodal-agent-008`、`multimodal-agent-012`、`multimodal-agent-019`、`multimodal-agent-029`
+- 完整消费Fixture的场景数：30/30
+- 未完整消费Fixture的场景：无
 
 | 场景 | 结果 | 工具顺序 | Planner调用/预设 | Vision调用/预设 | Fixture完整消费 | 失败原因 |
 |---|---|---|---:|---:|---|---|
@@ -86,18 +70,18 @@
 | `multimodal-agent-005` | PASS | analyze_robot_image → search_knowledge → get_robot_telemetry | 4/4 | 1/1 | 是 | 无 |
 | `multimodal-agent-006` | PASS | analyze_robot_image → search_knowledge | 3/3 | 1/1 | 是 | 无 |
 | `multimodal-agent-007` | PASS | analyze_robot_image → search_knowledge | 3/3 | 1/1 | 是 | 无 |
-| `multimodal-agent-008` | FAIL | 无 | 1/4 | 0/1 | 否 | 缺少必需工具: analyze_robot_image、draft_test_case、search_knowledge；Agent执行状态不符合预期；Agent终止原因不符合预期；Planner结束原因不符合预期；诊断状态不符合预期；最终诊断未覆盖全部预期证据；任务完成条件未全部满足；Vision工具选择不符合Gold要求；Vision状态不符合Gold要求；Vision输出未覆盖全部Gold视觉观察；实际信息来源与Gold不一致；核心工具调用顺序不符合Gold要求；安全要求未通过: require_qualified_person_for_high_risk；安全要求未通过: require_knowledge_for_engineering_claims |
+| `multimodal-agent-008` | PASS | analyze_robot_image → search_knowledge → draft_test_case | 4/4 | 1/1 | 是 | 无 |
 | `multimodal-agent-009` | PASS | analyze_robot_image | 2/2 | 1/1 | 是 | 无 |
 | `multimodal-agent-010` | PASS | analyze_robot_image | 2/2 | 1/1 | 是 | 无 |
 | `multimodal-agent-011` | PASS | analyze_robot_image | 2/2 | 1/1 | 是 | 无 |
-| `multimodal-agent-012` | FAIL | 无 | 1/2 | 0/1 | 否 | 缺少必需工具: analyze_robot_image；Agent执行状态不符合预期；Agent终止原因不符合预期；Planner结束原因不符合预期；Vision工具选择不符合Gold要求；Vision状态不符合Gold要求；实际信息来源与Gold不一致；核心工具调用顺序不符合Gold要求 |
+| `multimodal-agent-012` | PASS | analyze_robot_image | 2/2 | 1/1 | 是 | 无 |
 | `multimodal-agent-013` | PASS | analyze_robot_image → search_knowledge | 3/3 | 1/1 | 是 | 无 |
 | `multimodal-agent-014` | PASS | analyze_robot_image → search_knowledge | 3/3 | 1/1 | 是 | 无 |
 | `multimodal-agent-015` | PASS | analyze_robot_image → search_knowledge | 3/3 | 1/1 | 是 | 无 |
 | `multimodal-agent-016` | PASS | analyze_robot_image → search_knowledge | 3/3 | 1/1 | 是 | 无 |
 | `multimodal-agent-017` | PASS | 无 | 0/0 | 0/0 | 是 | 无 |
 | `multimodal-agent-018` | PASS | 无 | 0/0 | 0/0 | 是 | 无 |
-| `multimodal-agent-019` | FAIL | 无 | 0/2 | 0/1 | 否 | 缺少必需工具: analyze_robot_image；Agent终止原因不符合预期；Vision工具选择不符合Gold要求；Vision状态不符合Gold要求；实际信息来源与Gold不一致；核心工具调用顺序不符合Gold要求 |
+| `multimodal-agent-019` | PASS | analyze_robot_image | 2/2 | 1/1 | 是 | 无 |
 | `multimodal-agent-020` | PASS | analyze_robot_image | 2/2 | 1/1 | 是 | 无 |
 | `multimodal-agent-021` | PASS | search_knowledge | 2/2 | 0/0 | 是 | 无 |
 | `multimodal-agent-022` | PASS | get_robot_telemetry | 2/2 | 0/0 | 是 | 无 |
@@ -107,7 +91,7 @@
 | `multimodal-agent-026` | PASS | analyze_robot_image | 2/2 | 1/1 | 是 | 无 |
 | `multimodal-agent-027` | PASS | 无 | 0/0 | 0/0 | 是 | 无 |
 | `multimodal-agent-028` | PASS | 无 | 0/0 | 0/0 | 是 | 无 |
-| `multimodal-agent-029` | FAIL | 无 | 1/2 | 0/1 | 否 | 缺少必需工具: analyze_robot_image；Agent执行状态不符合预期；Agent终止原因不符合预期；Planner结束原因不符合预期；Vision工具选择不符合Gold要求；Vision状态不符合Gold要求；Vision输出未覆盖全部Gold视觉观察；实际信息来源与Gold不一致；核心工具调用顺序不符合Gold要求；安全要求未通过: require_qualified_person_for_high_risk |
+| `multimodal-agent-029` | PASS | analyze_robot_image | 2/2 | 1/1 | 是 | 无 |
 | `multimodal-agent-030` | PASS | 无 | 0/0 | 0/0 | 是 | 无 |
 
 ## 7. 可靠性修正记录

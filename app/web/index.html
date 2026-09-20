@@ -274,6 +274,21 @@
                     >
                         清空输入
                     </button>
+
+                    <!--
+                    本按钮只中断浏览器对当前SSE连接的等待。
+
+                    它不会向机器人发送停止、复位或其他控制命令；
+                    后端会在连接关闭后取消仍在等待的诊断协程。
+                    -->
+                    <button
+                        id="abort-stream-button"
+                        class="secondary-button"
+                        type="button"
+                        disabled
+                    >
+                        停止等待
+                    </button>
                 </div>
             </form>
         </section>
@@ -293,9 +308,38 @@
                     </h2>
                 </div>
 
-                <p id="result-status">
-                    尚未执行诊断
-                </p>
+                <div class="result-heading-actions">
+                    <p id="result-status">
+                        尚未执行诊断
+                    </p>
+
+                    <!--
+                    导出按钮只在取得最终响应或加载保存会话后显示。
+                    浏览器直接导出已经校验的公开响应，
+                    不会向服务端索取图片或Planner原始内容。
+                    -->
+                    <div class="export-actions">
+                        <button
+                            id="export-json-button"
+                            class="secondary-button compact-button"
+                            type="button"
+                            disabled
+                            hidden
+                        >
+                            导出 JSON
+                        </button>
+
+                        <button
+                            id="export-markdown-button"
+                            class="secondary-button compact-button"
+                            type="button"
+                            disabled
+                            hidden
+                        >
+                            导出 Markdown
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- 请求尚未开始时显示。 -->
@@ -323,6 +367,39 @@
                 <p id="error-message"></p>
                 <p id="error-request-id"></p>
             </div>
+
+            <!--
+            SSE连接建立后立即显示。
+
+            这里展示的是服务端公开的生命周期事件和脱敏摘要，
+            不显示Planner原始输出、图片Base64或完整日志。
+            -->
+            <section
+                id="stream-progress"
+                class="stream-progress"
+                aria-labelledby="stream-progress-heading"
+                hidden
+            >
+                <div class="stream-progress-heading">
+                    <h3 id="stream-progress-heading">
+                        实时执行状态
+                    </h3>
+
+                    <p
+                        id="stream-connection-status"
+                        role="status"
+                        aria-live="polite"
+                    >
+                        尚未连接
+                    </p>
+                </div>
+
+                <ol
+                    id="stream-event-list"
+                    class="stream-event-list"
+                    aria-live="polite"
+                ></ol>
+            </section>
 
             <!-- 成功取得HTTP 200响应后显示。 -->
             <article

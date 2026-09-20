@@ -81,10 +81,16 @@ MissingInformationItem = Annotated[
 # abstained：
 # 证据不足、冲突或置信度太低，
 # 系统拒绝给出原因和排查动作。
+#
+# human_review_required：
+# 请求涉及高风险控制、现场资质、证据冲突
+# 或其他必须由人确认的情况。该状态允许保留
+# 已经完成的只读观察，但不表示允许执行控制动作。
 DiagnosisStatus = Literal[
     "completed",
     "partial",
     "abstained",
+    "human_review_required",
 ]
 
 DiagnosisRiskLevel = Literal[
@@ -533,22 +539,36 @@ class DiagnosisReport(BaseModel):
 
             return self
 
-        # completed和partial都声称给出了某种诊断，
-        # 所以必须存在真实检索证据。
-        if not self.evidence:
-            raise ValueError(
-                "非拒答报告必须包含证据"
-            )
+        if self.status == "human_review_required":
+            # 转人工是正常、安全的业务终态，
+            # 不是证据不足拒答，也不是运行失败。
+            #
+            # 它可以发生在任何知识库结论形成之前，
+            # 例如确定性安全分类器直接识别到
+            # 真实设备控制请求；因此这里不强制要求
+            # evidence、possible_causes或next_checks。
+            if not self.missing_information:
+                raise ValueError(
+                    "human_review_required报告必须说明"
+                    "需要人工审核的原因"
+                )
+        else:
+            # completed和partial都声称给出了某种诊断，
+            # 所以必须存在真实检索证据。
+            if not self.evidence:
+                raise ValueError(
+                    "非拒答报告必须包含证据"
+                )
 
-        # 非拒答报告不能只有证据列表，
-        # 必须至少形成一个原因或检查项。
-        if not (
-            self.possible_causes
-            or self.next_checks
-        ):
-            raise ValueError(
-                "非拒答报告至少需要一项原因或排查项"
-            )
+            # completed和partial不能只有证据列表，
+            # 必须至少形成一个原因或检查项。
+            if not (
+                self.possible_causes
+                or self.next_checks
+            ):
+                raise ValueError(
+                    "非拒答报告至少需要一项原因或排查项"
+                )
 
         if (
             self.status == "partial"

@@ -34,15 +34,25 @@ from app.agent.request_tool_policy import (
     AgentToolPolicy,
 )
 from app.agent.progress_reducer import AgentProgressReducer
+from app.agent.run_observer import AgentRunObserver
 from app.agent.vision_input_store import RequestVisionInputStore
 from app.errors import VisionInputValidationError
 from app.schemas.agent import ToolCall, ToolExecutionResult
-from app.schemas.agent_api import AgentDiagnosisRequest
+from app.schemas.agent_api import (
+    AgentDiagnosisRequest,
+    AgentDiagnosisResponse,
+)
 from app.schemas.agent_diagnosis import AgentDiagnosisDraft
 from app.schemas.agent_planning import AgentToolInteraction
 from app.schemas.agent_progress import AgentProgress
 from app.schemas.agent_runtime import AgentRunResult
-from app.schemas.agent_tool_policy import AgentToolPolicyDecision
+from app.schemas.agent_tool_policy import (
+    AgentReadOnlyToolName,
+    AgentRequiredCapability,
+    AgentToolPolicyDecision,
+    AgentToolPolicyDisposition,
+    AgentToolPolicyReasonCode,
+)
 from app.schemas.agent_tools import (
     DraftTestCaseEvidence,
     DraftTestCaseStep,
@@ -105,6 +115,11 @@ class FakeRunner:
         self.initial_progresses: list[
             AgentProgress | None
         ] = []
+        # 保存Service在SSE模式下传入的观察者。
+        # 普通JSON模式调用时该列表记录None。
+        self.observers: list[
+            AgentRunObserver | None
+        ] = []
 
     async def run(
         self,
@@ -117,8 +132,11 @@ class FakeRunner:
         initial_progress: (
             AgentProgress | None
         ) = None,
+        observer: (
+            AgentRunObserver | None
+        ) = None,
     ) -> AgentRunResult | object:
-        """记录任务和工具范围，不执行真实Agent循环。"""
+        """记录任务、工具范围和Observer，不运行真实循环。"""
 
         self.tasks.append(task)
         self.allowed_tool_scopes.append(
@@ -127,6 +145,7 @@ class FakeRunner:
         self.initial_progresses.append(
             initial_progress
         )
+        self.observers.append(observer)
         return self.result
 
 
@@ -135,6 +154,132 @@ class SyncRunner:
 
     def run(self, task: str, /) -> object:
         return task
+
+
+class RecordingRunObserver:
+    """记录完整诊断生命周期通知的异步测试对象。
+
+    该Fake不发布SSE。它用于同时确认：
+
+    1. AgentDiagnosisService调用四个外层生命周期方法；
+    2. Service把同一个Observer实例继续传递给Runner；
+    3. 最终响应通知携带Service真正返回的响应对象。
+    """
+
+    def __init__(self) -> None:
+        # events只保存稳定事件名和必要的小型字段，
+        # 不复制完整请求、日志或图片内容。
+        self.events: list[
+            tuple[str, object]
+        ] = []
+
+    async def on_request_received(
+        self,
+        *,
+        image_count: int,
+        has_task_goal: bool,
+    ) -> None:
+        """记录请求接收通知及非敏感请求摘要。"""
+
+        self.events.append(
+            (
+                "request_received",
+                (image_count, has_task_goal),
+            )
+        )
+
+    async def on_safety_classified(
+        self,
+        *,
+        disposition: (
+            AgentToolPolicyDisposition
+        ),
+        reason_codes: tuple[
+            AgentToolPolicyReasonCode,
+            ...,
+        ],
+    ) -> None:
+        """记录确定性安全和工具策略处置。"""
+
+        self.events.append(
+            (
+                "safety_classified",
+                (disposition, reason_codes),
+            )
+        )
+
+    async def on_tool_scope_decided(
+        self,
+        *,
+        required_capabilities: tuple[
+            AgentRequiredCapability,
+            ...,
+        ],
+        allowed_tool_names: tuple[
+            AgentReadOnlyToolName,
+            ...,
+        ],
+    ) -> None:
+        """记录策略与注册表取交集后的真实工具范围。"""
+
+        self.events.append(
+            (
+                "tool_scope_decided",
+                (
+                    required_capabilities,
+                    allowed_tool_names,
+                ),
+            )
+        )
+
+    async def on_planning_started(
+        self,
+        *,
+        step_number: int,
+        allowed_tool_names: tuple[
+            str,
+            ...,
+        ],
+    ) -> None:
+        """接收规划开始通知。"""
+
+    async def on_tool_started(
+        self,
+        *,
+        step_id: int,
+        tool_call: ToolCall,
+    ) -> None:
+        """接收工具开始通知。"""
+
+    async def on_tool_finished(
+        self,
+        *,
+        step_id: int,
+        tool_call: ToolCall,
+        result: ToolExecutionResult,
+    ) -> None:
+        """接收工具结束通知。"""
+
+    async def on_progress_updated(
+        self,
+        *,
+        progress: AgentProgress,
+    ) -> None:
+        """接收确定性进度通知。"""
+
+    async def on_diagnosis_finished(
+        self,
+        *,
+        response: AgentDiagnosisResponse,
+    ) -> None:
+        """记录完成校验和可选持久化后的最终响应。"""
+
+        self.events.append(
+            (
+                "diagnosis_finished",
+                response,
+            )
+        )
 
 
 def make_request(
@@ -269,7 +414,7 @@ def make_final_draft_json(
             risk_level="medium",
             abstained=False,
         )
-    else:
+    elif status == "abstained":
         draft = AgentDiagnosisDraft(
             status="abstained",
             risk_level="unknown",
@@ -277,6 +422,15 @@ def make_final_draft_json(
                 "当前工具观察仍不足",
             ),
             abstained=True,
+        )
+    else:
+        draft = AgentDiagnosisDraft(
+            status="human_review_required",
+            risk_level="unknown",
+            missing_information=(
+                "需要具备权限和资质的人员复核现场安全状态",
+            ),
+            abstained=False,
         )
 
     return json.dumps(
@@ -637,6 +791,63 @@ async def test_service_passes_minimal_tool_scope_to_runner(
         "search_knowledge",
     ]
 
+    # 普通JSON调用没有传Observer，Service应保持原有
+    # Runner调用语义，不会无故开启实时事件路径。
+    assert runner.observers == [None]
+
+
+@pytest.mark.asyncio
+async def test_service_passes_optional_observer_to_runner(
+) -> None:
+    """SSE模式应发布外层事件并把同一Observer传入Runner。
+
+    被测试模块是AgentDiagnosisService.diagnose()新增的
+    observer参数。测试使用RecordingRunObserver记录通知，
+    不发布真实SSE；FakeRunner只记录它实际收到的对象。
+
+    预期流程是请求接收、策略分类、工具范围、Runner执行、
+    最终响应。FakeRunner收到的Observer必须与调用者传入
+    对象使用同一身份，最终通知也必须携带实际返回对象。
+    """
+
+    service, runner = make_service(
+        make_completed_result()
+    )
+    observer = RecordingRunObserver()
+
+    response = await service.diagnose(
+        make_request(
+            task_goal=(
+                "检索知识库中的网络恢复规则"
+            ),
+        ),
+        TEST_REQUEST_ID,
+        observer=observer,
+    )
+
+    assert response.diagnosis.status == (
+        "completed"
+    )
+    assert runner.observers == [observer]
+    assert [
+        event_name
+        for event_name, _ in observer.events
+    ] == [
+        "request_received",
+        "safety_classified",
+        "tool_scope_decided",
+        "diagnosis_finished",
+    ]
+    assert observer.events[0][1] == (
+        0,
+        True,
+    )
+    assert observer.events[2][1] == (
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+    )
+    assert observer.events[-1][1] is response
+
 
 @pytest.mark.asyncio
 async def test_service_downgrades_planner_completion_to_partial_progress(
@@ -682,6 +893,53 @@ async def test_service_downgrades_planner_completion_to_partial_progress(
 
 
 @pytest.mark.asyncio
+async def test_service_preserves_planner_human_review_status(
+) -> None:
+    """Planner人工审核结束必须保留为独立公开状态。
+
+    被测试模块是AgentDiagnosisService.diagnose()中的最终草稿
+    解析和报告构造。Fake Runner正常结束，finish_reason和草稿
+    status都使用human_review_required，草稿不包含控制步骤。
+
+    预期流程是Service再次校验结束原因与草稿状态的一一映射，
+    再构造DiagnosisReport。预期公开状态仍是
+    human_review_required、abstained为false，并保留需要有资质
+    人员确认的说明；不能退化成普通abstained。
+    """
+
+    service, _ = make_service(
+        make_completed_result(
+            finish_reason=(
+                "human_review_required"
+            ),
+            final_message=(
+                make_final_draft_json(
+                    status=(
+                        "human_review_required"
+                    )
+                )
+            ),
+        )
+    )
+
+    response = await service.diagnose(
+        make_request(),
+        TEST_REQUEST_ID,
+    )
+
+    assert response.execution.finish_reason == (
+        "human_review_required"
+    )
+    assert response.diagnosis.status == (
+        "human_review_required"
+    )
+    assert response.diagnosis.abstained is False
+    assert response.diagnosis.missing_information == [
+        "需要具备权限和资质的人员复核现场安全状态",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_service_stops_high_risk_request_before_image_decode(
 ) -> None:
     """高风险控制请求必须在图片适配和Planner之前结束。
@@ -703,6 +961,7 @@ async def test_service_stops_high_risk_request_before_image_decode(
         make_completed_result(),
         vision_input_store=vision_store,
     )
+    observer = RecordingRunObserver()
 
     response = await service.diagnose(
         make_request(
@@ -712,6 +971,7 @@ async def test_service_stops_high_risk_request_before_image_decode(
             images=[unsafe_image],
         ),
         TEST_REQUEST_ID,
+        observer=observer,
     )
 
     assert response.execution.state == "completed"
@@ -722,9 +982,28 @@ async def test_service_stops_high_risk_request_before_image_decode(
         "human_review_required"
     )
     assert response.execution.step_count == 0
-    assert response.diagnosis.abstained is True
+    assert response.diagnosis.status == (
+        "human_review_required"
+    )
+    assert response.diagnosis.abstained is False
     assert runner.tasks == []
     assert len(vision_store) == 0
+    assert [
+        event_name
+        for event_name, _ in observer.events
+    ] == [
+        "request_received",
+        "safety_classified",
+        "diagnosis_finished",
+    ]
+    assert observer.events[0][1] == (
+        1,
+        True,
+    )
+    assert observer.events[1][1][0] == (
+        "human_review_required"
+    )
+    assert observer.events[-1][1] is response
 
 
 @pytest.mark.asyncio
@@ -763,6 +1042,10 @@ async def test_service_stops_prompt_injection_before_runner(
     assert response.execution.finish_reason == (
         "human_review_required"
     )
+    assert response.diagnosis.status == (
+        "human_review_required"
+    )
+    assert response.diagnosis.abstained is False
     assert response.execution.steps == []
     assert runner.tasks == []
     assert "run_shell" not in (
@@ -1295,7 +1578,7 @@ async def test_service_persists_session_and_returns_session_id(
 
     预期流程是FakeRunner产生确定结果，Service构造公开响应，
     DiagnosticSessionBuilder生成脱敏记录，Store写入JSON，
-    最终响应才携带可查询的session_id。
+    最终响应及Observer终态通知才携带可查询的session_id。
     """
 
     session_store = DiagnosticSessionStore(
@@ -1311,10 +1594,12 @@ async def test_service_persists_session_and_returns_session_id(
         session_store=session_store,
     )
     request = make_request()
+    observer = RecordingRunObserver()
 
     response = await service.diagnose(
         request,
         TEST_REQUEST_ID,
+        observer=observer,
     )
 
     assert response.session_id is not None
@@ -1336,6 +1621,14 @@ async def test_service_persists_session_and_returns_session_id(
     # 完整日志不会进入会话JSON；只保存字符数和SHA-256。
     assert request.log_excerpt not in stored_json
     assert "log_excerpt_sha256" in stored_json
+
+    # Observer收到的必须是保存成功后重建的响应，
+    # 因此它与公开返回值具有同一个非空session_id。
+    assert observer.events[-1][0] == (
+        "diagnosis_finished"
+    )
+    assert observer.events[-1][1] is response
+    assert response.session_id is not None
 
 
 @pytest.mark.asyncio

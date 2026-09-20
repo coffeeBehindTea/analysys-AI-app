@@ -1,122 +1,369 @@
-# Robot Knowledge Base API 架构设计
+# RobotOps Copilot MVP 架构设计
 
 ## 1. 文档目的
 
-本文档说明 Robot Knowledge Base API 的模块边界、核心数据契约、文档摄取链路、混合RAG查询链路、结构化诊断链路、依赖注入、向量存储、错误处理、评测体系和主要设计决策。
+本文档说明 RobotOps Copilot MVP 的系统边界、分层职责、在线诊断主链路、Agent 控制层、只读工具层、RAG 证据层、会话存储、SSE 实时事件、Web 控制台和外部服务之间的数据流。
 
 README 主要回答：
 
 ```text
-项目怎样安装和运行？
+项目怎样安装、启动、测试和演示？
+```
+
+`project-proposal.md` 主要回答：
+
+```text
+产品为谁服务？
+MVP 包含什么？
+MVP 明确不包含什么？
+最终按照什么标准验收？
 ```
 
 本文档主要回答：
 
 ```text
 系统内部为什么这样设计？
-一次请求会经过哪些对象？
+一次诊断请求会经过哪些模块？
 每一层负责什么？
-哪些安全保证由代码完成，哪些仍依赖模型？
+哪些决定由LLM作出？
+哪些限制由Python代码强制执行？
+同步响应、SSE事件和会话记录如何共用同一条诊断链路？
 ```
 
-## 2. 系统范围
+本文档描述的是 Week 7 目标架构。其中已经存在的模块继续复用，计划新增的 SSE 和导出模块会在对应位置明确标记。
 
-当前项目包含三类 AI 能力。
+## 2. 系统演进与 MVP 范围
 
-### 2.1 Week 1：机器人故障分诊
+RobotOps Copilot 不是一个从零开始的新项目，而是前六周能力的产品化收口。
 
-输入：
+### 2.1 Week 1～3：API、RAG 和证据层
 
-- 机器人 ID；
-- 故障现象；
-- 脱敏日志。
+Week 1～3 建立了：
 
-输出：
+- FastAPI 路由和 Pydantic 数据契约；
+- 统一异常处理和 Request ID；
+- 普通 JSON 与 SSE 基础能力；
+- PDF、Markdown 和 TXT 文档摄取；
+- Chunk、Embedding 和 ChromaDB；
+- 向量与关键词混合检索；
+- RRF 融合和头部保留重排；
+- 组合证据门控；
+- 证据约束回答和结构化诊断；
+- 真实 Chunk 引用白名单；
+- 检索、引用和安全拒答评测。
 
-- 故障摘要；
-- 推荐排查操作；
-- Request ID。
+这些能力构成 MVP 的知识库和证据基础。
 
-支持普通 JSON 和 SSE 流式响应。
+### 2.2 Week 4～5：Agent 和多模态能力
 
-### 2.2 Week 2：机器人研发知识库 RAG
+Week 4～5 建立了：
 
-输入：
+- Planner、Runner、Executor 和 Tool Registry；
+- `search_knowledge` 知识库工具；
+- `get_robot_telemetry` 模拟遥测工具；
+- `draft_test_case` 测试草案工具；
+- `get_current_time` 时间工具；
+- 图片输入适配和请求级图片 Store；
+- Vision Provider；
+- 本地 OCR 和确定性规则解析；
+- `analyze_robot_image` 视觉观察工具；
+- Agent 工具轨迹；
+- 视觉观察、用户输入、模拟遥测和知识库证据的来源分层；
+- 多模态场景和可靠性评测。
 
-- PDF、Markdown、TXT 文档；
-- 自然语言问题。
+这些能力使系统能够根据任务调用多个只读工具，而不是只执行固定的 RAG 流程。
 
-输出：
+### 2.3 Week 6：Agent 可靠性和产品化基础
 
-- 只根据知识库证据生成的回答；
-- 可定位到文件和页码或章节的引用；
-- 检索耗时；
-- 是否拒答。
+Week 6 建立了：
 
-Week 2 的核心不是让模型“知道更多”，而是建立一个可追溯、可评测、无证据时能够拒答的知识访问层。
+- 请求级最小工具策略；
+- Planner 前的确定性安全分类；
+- `AgentProgress` 结构化进度状态；
+- `AgentProgressReducer` 确定性状态转换；
+- 重复和越权工具调用阻止；
+- 30 条场景的离线 Fixture 回归；
+- 脱敏诊断会话；
+- 最近会话和按 ID 查询接口；
+- 轻量 Web 控制台；
+- Dockerfile 和 Compose 启动方式。
 
-### 2.3 Week 3：混合检索与结构化诊断
+这些能力把权限、进度、证据和停止条件从 Prompt 下沉到 Python 代码。
 
-输入：
+### 2.4 Week 7：RobotOps Copilot MVP
 
-- 自然语言知识库问题；或
-- 机器人编号、故障现象、脱敏日志和可选检索范围。
+Week 7 在前六周基础上完成：
 
-新增能力：
+- 冻结目标用户、输入、输出和安全范围；
+- 支持 `completed`、`partial`、`abstained` 和 `human_review_required` 四类公开状态；
+- 打通文字日志与可选图片的完整诊断主链路；
+- 为 Agent 运行增加公开、脱敏的 SSE 实时事件；
+- 在 Web 控制台实时展示状态、工具、来源和终止原因；
+- 支持 Markdown 或 JSON 导出；
+- 回归 Week 6 的四条失败场景；
+- 准备至少十条端到端验收场景；
+- 在干净目录中验证 Docker 启动和知识库准备流程；
+- 使 README、测试总数和 JUnit 报告保持一致。
 
-- 错误码、型号、数值和单位的确定性归一化；
-- 向量与关键词双路召回；
-- Reciprocal Rank Fusion；
-- `deterministic-v2`查询改写；
-- `head-preserving-v1`头部保留重排；
-- `hybrid-evidence-gate-v1`组合证据门控；
-- 受Pydantic约束的结构化诊断报告；
-- 原因和检查项到真实Chunk ID的白名单映射；
-- 冲突、无答案、非法输出、超时和上游失败的稳定降级。
+### 2.5 MVP 不包含的能力
 
-Week 3 的核心是把“检索、门控、生成、引用”拆成可以独立评测的阶段，并让诊断结果中的每项非空结论都能追溯到本次返回的真实证据。
+当前 MVP 不包含：
 
-当前系统不包含：
+- 真实机器人控制；
+- 真实 RCS、WMS 或生产遥测连接；
+- 自动任务下发；
+- 自动复位和维修执行；
+- 急停或安全联锁绕过；
+- 图片二维码和外部网址访问；
+- 自动执行测试草案；
+- 用户认证和多租户隔离；
+- 生产级消息队列；
+- 分布式任务恢复；
+- 生产级高可用部署；
+- 使用 Vision 观察替代知识库证据或人工确认。
 
-- Agent 自动规划；
-- 实时机器人控制；
-- RCS、WMS 或遥测接口；
-- 多用户权限；
-- 正式前端；
-- 生产级分布式向量数据库。
+所有工具保持只读。高风险请求可以在策略允许时进行只读观察，但最终必须转入人工审核，不能生成可直接执行的控制指令。
 
-## 3. 系统上下文
+## 3. 系统上下文与 MVP 总体架构
+
+### 3.1 总体数据流
 
 ```mermaid
-flowchart LR
-    Client["调用方<br/>Swagger / 脚本 / 其他服务"]
-    API["FastAPI Application"]
-    LLM["OpenAI兼容<br/>生成式LLM服务"]
-    Embedding["OpenAI兼容<br/>Embedding服务"]
-    Chroma["本地ChromaDB"]
-    Files["公开或脱敏文档"]
-    Reports["JSON / Markdown<br/>评测报告"]
+flowchart TD
+    subgraph Clients["客户端与展示层"]
+        Console["Web控制台<br/>输入、SSE展示、会话和导出"]
+        ApiClient["API调用方<br/>脚本、Swagger或其他服务"]
+    end
 
-    Client --> API
-    Files --> API
-    API --> Embedding
-    API --> LLM
-    API --> Chroma
-    Chroma --> API
-    API --> Client
+    subgraph ApiLayer["FastAPI协议层"]
+        StaticRoute["/console/<br/>静态页面"]
+        SyncRoute["POST /api/v1/agent/diagnose<br/>同步诊断"]
+        StreamRoute["POST /api/v1/agent/diagnose/stream<br/>SSE诊断，Week 7新增"]
+        SessionRoute["GET /api/v1/diagnostic-sessions<br/>会话查询"]
+        ExportRoute["会话导出接口<br/>Markdown或JSON，Week 7新增"]
+    end
 
-    Files --> Reports
-    Chroma --> Reports
-    LLM --> Reports
+    subgraph ControlLayer["确定性控制与Agent编排层"]
+        DiagnosisService["AgentDiagnosisService<br/>MVP诊断主编排"]
+        ImageAdapter["VisionInputAdapter<br/>图片解码和资源校验"]
+        ImageStore["RequestVisionInputStore<br/>请求级图片引用"]
+        Safety["AgentRequestSafetyClassifier<br/>Planner前安全分类"]
+        Policy["AgentToolPolicy<br/>计算最小工具范围"]
+        Progress["AgentProgressReducer<br/>更新能力、证据和停止状态"]
+        Runner["AgentRunner<br/>受控规划与工具循环"]
+        Planner["OpenAICompatibleAgentPlanner<br/>LLM选择下一步"]
+        Executor["ToolExecutor<br/>权限、参数、超时和输出校验"]
+        EvidenceStore["ConfirmedEvidenceStore<br/>请求级真实证据白名单"]
+        ReportBuilder["AgentDiagnosisReportBuilder<br/>最终草稿和引用校验"]
+        EventPublisher["AgentEventPublisher<br/>公开SSE事件，Week 7新增"]
+    end
+
+    subgraph ToolLayer["只读工具层"]
+        VisionTool["analyze_robot_image<br/>图片可见观察"]
+        SearchTool["search_knowledge<br/>知识库工程证据"]
+        TelemetryTool["get_robot_telemetry<br/>脱敏模拟遥测"]
+        DraftTool["draft_test_case<br/>待审核测试草案"]
+        TimeTool["get_current_time<br/>服务器UTC时间"]
+    end
+
+    subgraph KnowledgeLayer["知识与外部Provider层"]
+        VisionProvider["Vision Provider<br/>概率性图片观察"]
+        TextLLM["文本LLM<br/>Planner结构化决定"]
+        Embedding["Embedding Provider<br/>查询向量"]
+        Chroma["ChromaDB<br/>Chunk向量、正文和元数据"]
+        TelemetryStore["SimulatedTelemetryStore<br/>进程内脱敏快照"]
+    end
+
+    subgraph PersistenceLayer["结果与可观测性层"]
+        SessionBuilder["DiagnosticSessionBuilder<br/>构造脱敏会话"]
+        SessionStore["DiagnosticSessionStore<br/>本地JSON持久化"]
+        Exporter["DiagnosisExporter<br/>Markdown或JSON，Week 7新增"]
+    end
+
+    Console --> StaticRoute
+    Console --> StreamRoute
+    Console --> SessionRoute
+    Console --> ExportRoute
+    ApiClient --> SyncRoute
+    ApiClient --> StreamRoute
+
+    SyncRoute --> DiagnosisService
+    StreamRoute --> DiagnosisService
+
+    DiagnosisService --> ImageAdapter
+    ImageAdapter --> ImageStore
+
+    DiagnosisService --> Safety
+    Safety --> Policy
+    Policy --> Progress
+    Progress --> Runner
+
+    Runner --> Planner
+    Planner --> TextLLM
+    TextLLM --> Planner
+    Planner --> Runner
+
+    Runner --> Executor
+    Executor --> VisionTool
+    Executor --> SearchTool
+    Executor --> TelemetryTool
+    Executor --> DraftTool
+    Executor --> TimeTool
+
+    ImageStore --> VisionTool
+    VisionTool --> VisionProvider
+    VisionProvider --> VisionTool
+
+    SearchTool --> Embedding
+    Embedding --> SearchTool
+    SearchTool --> Chroma
+    Chroma --> SearchTool
+    SearchTool --> EvidenceStore
+
+    TelemetryTool --> TelemetryStore
+    TelemetryStore --> TelemetryTool
+
+    EvidenceStore --> DraftTool
+    EvidenceStore --> ReportBuilder
+
+    Executor --> Runner
+    Runner --> Progress
+    Progress --> Runner
+
+    Runner --> EventPublisher
+    Progress --> EventPublisher
+    EventPublisher --> StreamRoute
+
+    Runner --> DiagnosisService
+    DiagnosisService --> ReportBuilder
+    ReportBuilder --> DiagnosisService
+
+    DiagnosisService --> SessionBuilder
+    SessionBuilder --> SessionStore
+
+    SessionRoute --> SessionStore
+    ExportRoute --> SessionStore
+    SessionStore --> Exporter
+    Exporter --> ExportRoute
 ```
 
-系统存在三个主要外部边界：
+### 3.2 当前核心编排模块
 
-1. HTTP 调用方；
-2. LLM 和 Embedding 上游服务；
-3. 本地文件系统和 ChromaDB。
+`AgentDiagnosisService` 是 MVP 在线诊断链路的核心编排模块。
 
-外部服务和输入都被视为可能失败或返回无效数据，因此每个边界都有校验和异常转换。
+它不直接实现 Vision、知识检索或遥测，而是组织这些能力的调用顺序和数据边界。
+
+调用链如下：
+
+```text
+Agent Router（校验HTTP请求并取得request_id）
+  -> AgentDiagnosisService（当前模块：组织一次完整诊断）
+  -> VisionInputAdapter（校验可选图片）
+  -> AgentRequestSafetyClassifier（执行确定性安全分类）
+  -> AgentToolPolicy（计算required_capabilities和allowed_tool_names）
+  -> AgentProgressReducer（创建初始进度）
+  -> AgentRunner（运行规划、工具和观察循环）
+  -> AgentDiagnosisReportBuilder（校验诊断草稿与证据）
+  -> DiagnosticSessionBuilder（构造脱敏会话）
+  -> DiagnosticSessionStore（持久化会话）
+  -> AgentDiagnosisResponse（返回公开结果）
+```
+
+同步接口和 SSE 接口必须复用这一条业务链路。
+
+SSE 不能复制一份独立的诊断逻辑，否则同步接口与流式接口可能产生不同的安全策略、工具范围和最终状态。
+
+### 3.3 SSE 事件在架构中的位置
+
+Week 7 计划增加的 `AgentEventPublisher` 位于 Agent 执行过程和 HTTP SSE 编码之间。
+
+调用链如下：
+
+```text
+AgentRunner或AgentProgressReducer（产生公开状态变化）
+  -> AgentEventPublisher（当前计划新增模块：接收结构化公开事件）
+  -> asyncio.Queue（隔离诊断任务和网络发送速度）
+  -> SSE响应生成器（编码event、id和data）
+  -> Web控制台（按事件类型更新页面）
+```
+
+事件发布器只接收允许公开的结构化字段，例如：
+
+- 请求已经接收；
+- 安全分类结果；
+- 允许工具集合；
+- Planner 开始规划；
+- 工具开始和结束；
+- 工具成功、空结果、超时或失败；
+- AgentProgress 当前状态；
+- 最终诊断状态；
+- 流式连接错误。
+
+事件发布器不得读取或发送：
+
+- 完整图片 Base64；
+- API Key；
+- Authorization；
+- 完整敏感日志；
+- 未脱敏工具参数；
+- SDK 原始响应；
+- 模型私有思维链。
+
+### 3.4 确定性代码与概率性模型的职责
+
+| 组件 | 是否使用生成式模型 | 职责 |
+|---|---|---|
+| FastAPI Router | 否 | HTTP 参数、请求体和响应类型 |
+| Pydantic Schema | 否 | 字段、枚举、长度和跨字段约束 |
+| Safety Classifier | 否 | 高风险控制和不可信指令分类 |
+| Agent Tool Policy | 否 | 最小能力和工具权限 |
+| AgentProgressReducer | 否 | 状态转换、证据覆盖和停止条件 |
+| AgentRunner | 否 | 循环、超时、重复调用和失败上限 |
+| ToolExecutor | 否 | 工具白名单、参数、权限和返回值 |
+| Planner | 是 | 在允许工具中选择下一步或提出结束 |
+| Vision Provider | 是 | 生成结构化图片可见观察 |
+| Knowledge Retrieval | Embedding 是，排序和门控否 | 检索知识库候选并确认工程证据 |
+| Report Builder | 否 | 最终草稿、引用和来源白名单校验 |
+| Session Store | 否 | 保存和查询脱敏会话 |
+| SSE Publisher | 否 | 发布公开、脱敏的结构化事件 |
+| Web Console | 否 | 展示输入、状态、证据、轨迹和导出 |
+
+核心原则是：
+
+```text
+模型可以提出建议，
+但模型不能决定自己的权限，
+不能声明未经工具确认的能力已经完成，
+不能伪造证据，
+也不能绕过安全终止状态。
+```
+
+### 3.5 信任边界
+
+系统数据按照以下可信级别处理：
+
+```text
+用户文本、日志和图片
+  -> 不可信输入
+
+Planner与Vision输出
+  -> 概率性外部输出，必须经过Schema和代码校验
+
+知识库Chunk与模拟遥测
+  -> 已确认来源，但只在各自适用范围内有效
+
+Python安全规则、工具权限和状态转换
+  -> 确定性控制边界
+
+最终DiagnosisReport和DiagnosticSessionRecord
+  -> 经过公开契约和脱敏规则校验的输出
+```
+
+Vision 观察只能证明图片中可见什么，不能单独证明故障原因、维修步骤、安全条件或现场设备真实状态。
+
+知识库证据只能证明文档记载了什么，不能证明对应操作已经在现场执行。
+
+模拟遥测只能证明当前教学 Store 中保存了什么，不能代表真实生产机器人。
 
 ## 4. 应用分层
 
@@ -1484,34 +1731,32 @@ JSON解析
 
 ## 19. 已知架构限制
 
-- 没有 OCR 管道。
-- 当前查询改写使用确定性词典和规则，不能覆盖任意领域关系。
-- 当前重排是头部保留策略，不是学习型Cross-Encoder。
-- `q027` 的跨文档“设备维护 + 业务验收”关系仍未完整召回。
-- 组合门控仍会保守拒绝 `q007`。
-- 没有文档版本管理。
-- 没有独立文档目录数据库。
-- 没有后台摄取任务队列。
-- 没有用户认证和权限过滤。
-- 没有多租户 Collection 隔离。
-- 没有实时遥测工具。
-- 没有知识库查询 SSE。
-- Prompt 安全规则仍属于软约束。
-- 本地 ChromaDB 不适合直接作为生产集群方案。
+- 真实 Planner、LLM 和 Vision 模型仍是概率型依赖；即使输入相同，也不能假设每次都返回完全相同的工具调用与最终文本。
+- 第六周的多模态离线回归使用固定 Fixture 隔离概率型依赖。它能够证明编排、策略、工具执行和报告构造链路稳定，但不能替代真实模型端到端评测。
+- Week 7 固定 Fixture 离线回归已严格通过 30/30，并关闭 `multimodal-agent-008`、`multimodal-agent-012`、`multimodal-agent-019` 和 `multimodal-agent-029` 四条遗留场景；该结果仍只证明确定性框架行为，不能替代真实模型抽样评测。
+- `completed`、`partial`、`abstained` 和 `human_review_required` 已贯通 Planner、诊断响应、会话持久化与评测层；真实模型仍可能产生无效结构，此时系统会按契约安全降级。
+- Agent 诊断已经提供结构化 SSE 事件流，并以 `diagnosis_finished` 或 `stream_error` 明确结束；当前实现仍是单进程内发布，不具备跨实例事件总线、断点续传或历史事件重放能力。
+- 当前诊断会话支持本地 JSON 持久化、查询和脱敏导出，但仍不适合作为多实例并发写入的生产数据库。
+- 遥测工具当前读取教学用内存快照，没有连接真实 RCS、WMS、机器人控制器或遥测平台。
+- OCR 和 Vision 已经能够处理请求图片，但文档摄取仍主要依赖 PDF 自带文字层；扫描版 PDF 的批量 OCR 不在本周 MVP 范围内。
+- 当前查询改写使用确定性词典和规则，不能覆盖任意领域关系；头部保留重排也不是学习型 Cross-Encoder。
+- 当前服务没有用户认证、细粒度权限、租户隔离和接口限流，因此不能直接暴露到不可信网络。
+- 本地 ChromaDB、内存遥测和文件会话存储都属于单机 MVP 方案，不适合作为生产集群的数据基础设施。
+- 所有 Agent 工具仍限定为只读或只生成草案；系统不会绕过急停、远程控制机器人，也不会自动执行真实设备复位。
 
-## 20. 后续演进方向
+## 20. 第七周实施顺序与后续演进
 
-推荐按以下顺序演进：
+第七周先完成可演示、可回归、可交付的 MVP 闭环：
 
 ```text
-1. 为查询改写、门控和Gold数据建立显式版本
-2. 增加回答语义正确性与多轮稳定性评测
-3. 研究受控查询分解或文档关系索引
-4. 评估学习型Cross-Encoder重排
-5. 将摄取迁移到后台任务
-6. 增加认证、权限和审计
-7. 接入RCS/WMS/遥测工具
-8. 在可靠工具层之上构建Agent
+1. 冻结诊断请求、SSE公开事件、诊断报告、引用和工具轨迹的数据契约
+2. 将human_review_required贯通到策略、服务、会话记录、SSE事件和控制台
+3. 在Agent执行过程与HTTP响应之间增加结构化事件发布层，并复用现有AgentDiagnosisService
+4. 修复第六周离线回归剩余的008、012、019和029四个场景
+5. 为诊断会话增加可审计的标准化导出能力
+6. 建立至少10条端到端场景，覆盖完成、部分完成、拒答和人工审核四类结果
+7. 补齐Docker干净目录启动、正式JUnit报告和公开演示样例
+8. 更新README与工程总结，使文档、测试结果和真实实现保持一致
 ```
 
-Agent 应建立在已经可测试的工具之上，而不是直接让模型访问所有系统并自行决定安全操作。
+MVP 验收完成后，再考虑认证与租户隔离、真实遥测适配器、数据库与任务队列、分布式向量检索、学习型重排以及生产监控。即使增加这些能力，Agent 仍应建立在可测试、可审计并受策略限制的工具之上，不能让模型直接访问所有系统或自行决定真实设备的安全操作。

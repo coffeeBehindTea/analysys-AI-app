@@ -9,7 +9,7 @@ Chroma、文件系统或HTTP服务。
 3. 高风险检查必须标记需有资质人员确认；
 4. 正常报告中的证据引用白名单；
 5. 未知Chunk引用和重复证据拒绝；
-6. completed、partial和abstained状态一致性；
+6. completed、partial、abstained和human_review_required状态一致性；
 7. 非拒答报告必须拥有真实证据；
 8. 未声明字段必须被拒绝。
 """
@@ -373,6 +373,55 @@ def test_abstained_report_cannot_include_conclusions(
         )
 
 
+def test_human_review_report_accepts_safe_empty_conclusions(
+) -> None:
+    """高风险请求可在没有知识库结论时正常转人工审核。"""
+
+    report = DiagnosisReport(
+        request_id="request-human-review-001",
+        prompt_version="agent-tool-calling-v2",
+        gate_version="agent-confirmed-evidence-v1",
+        status="human_review_required",
+        symptoms=make_symptoms(),
+        evidence=[],
+        possible_causes=[],
+        next_checks=[],
+        risk_level="high",
+        missing_information=[
+            "需要有权限和资质的人员确认现场安全状态"
+        ],
+        abstained=False,
+    )
+
+    assert report.status == "human_review_required"
+    assert report.abstained is False
+    assert report.evidence == []
+    assert report.missing_information
+
+
+def test_human_review_report_requires_review_reason(
+) -> None:
+    """转人工报告必须解释自动流程停止的具体原因。"""
+
+    with pytest.raises(
+        ValidationError,
+        match="human_review_required报告必须说明",
+    ):
+        DiagnosisReport(
+            request_id="request-human-review-002",
+            prompt_version="agent-tool-calling-v2",
+            gate_version="agent-confirmed-evidence-v1",
+            status="human_review_required",
+            symptoms=make_symptoms(),
+            evidence=[],
+            possible_causes=[],
+            next_checks=[],
+            risk_level="high",
+            missing_information=[],
+            abstained=False,
+        )
+
+
 def test_non_abstained_report_requires_evidence(
 ) -> None:
     """声称完成或部分完成的报告必须有真实证据。"""
@@ -402,6 +451,7 @@ def test_non_abstained_report_requires_evidence(
         ("abstained", False),
         ("completed", True),
         ("partial", True),
+        ("human_review_required", True),
     ],
 )
 def test_status_and_abstained_must_agree(

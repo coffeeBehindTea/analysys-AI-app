@@ -130,6 +130,30 @@ def make_abstained_diagnosis(
     )
 
 
+def make_human_review_diagnosis(
+) -> DiagnosticSessionDiagnosisSnapshot:
+    """创建策略在工具执行前转人工的合法诊断快照。
+
+    该固定对象没有知识证据、原因或检查项，因为高风险请求
+    可以在Planner运行前被终止；missing_information保存的是
+    转人工所需的公开解释，而abstained必须保持False。
+    """
+
+    return DiagnosticSessionDiagnosisSnapshot(
+        prompt_version="agent-tool-calling-v8",
+        gate_version="agent-confirmed-evidence-v1",
+        status="human_review_required",
+        evidence=(),
+        possible_causes=(),
+        next_checks=(),
+        risk_level="unknown",
+        missing_information=(
+            "需要具备权限和资质的人员现场审核",
+        ),
+        abstained=False,
+    )
+
+
 def make_success_trace() -> AgentToolTraceEvent:
     """创建一次成功且已经脱敏的知识工具轨迹。"""
 
@@ -348,6 +372,34 @@ def test_abstained_snapshot_rejects_possible_causes() -> None:
             missing_information=("证据不足",),
             abstained=True,
         )
+
+
+def test_human_review_snapshot_accepts_pre_planner_termination(
+) -> None:
+    """人工审核快照允许在没有知识证据时持久化。
+
+    被测试模块是DiagnosticSessionDiagnosisSnapshot的模型级
+    状态校验器。
+
+    测试方法是使用make_human_review_diagnosis()构造一个在
+    Planner和工具运行前由安全策略终止的快照。
+
+    预期流程是Schema先验证status与abstained不矛盾，再进入
+    human_review_required专属分支，检查人工审核原因非空，且
+    不套用completed和partial必须携带证据的规则。
+
+    预期结果是模型构造成功，状态保持human_review_required，
+    abstained保持False，证据为空且人工审核原因被完整保留。
+    """
+
+    snapshot = make_human_review_diagnosis()
+
+    assert snapshot.status == "human_review_required"
+    assert snapshot.abstained is False
+    assert snapshot.evidence == ()
+    assert snapshot.missing_information == (
+        "需要具备权限和资质的人员现场审核",
+    )
 
 
 def test_metrics_rejects_failure_count_above_step_count(

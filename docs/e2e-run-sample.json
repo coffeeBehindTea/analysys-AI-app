@@ -1,0 +1,213 @@
+{
+  "sample_version": "robotops-copilot-e2e-sample-v1",
+  "execution_mode": "deterministic_offline",
+  "external_services_used": false,
+  "scenario_id": "multimodal-agent-002",
+  "scenario_name": "清晰网络面板知识与模拟遥测核对",
+  "fixture_version": "multimodal-offline-fixture-v1",
+  "request_summary": {
+    "robot_id": "robot-001",
+    "symptom": "网络已连接但机器人保持暂停",
+    "log_excerpt": "ERR-NET-4001; speed_mps=0.0; network_connected=true",
+    "task_goal": "读取面板、检索恢复条件并读取robot-001模拟遥测，核对当前状态",
+    "image_refs": [
+      "image_001"
+    ]
+  },
+  "images": [
+    {
+      "image_ref": "image_001",
+      "image_path": "data/multimodal/tool-selection/multimodal-001.png",
+      "image_sha256": "992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+      "mime_type": "image/png",
+      "analysis_goal": "只读取图片中可见的故障码、网络状态和任务状态",
+      "detail": "auto",
+      "image_bytes_persisted_in_trace": false
+    }
+  ],
+  "request_policy": {
+    "required_capabilities": [
+      "vision_observation",
+      "knowledge_evidence",
+      "robot_telemetry"
+    ],
+    "allowed_tool_names": [
+      "analyze_robot_image",
+      "search_knowledge",
+      "get_robot_telemetry"
+    ],
+    "forbidden_tool_names": [
+      "run_shell",
+      "execute_python",
+      "control_robot",
+      "reset_emergency_stop"
+    ]
+  },
+  "execution": {
+    "request_id": "offline-multimodal-agent-002",
+    "planner_prompt_version": "offline-agent-tool-calling-v1",
+    "state": "completed",
+    "termination_reason": "planner_finished",
+    "finish_reason": "task_completed",
+    "step_count": 3,
+    "tool_sequence": [
+      "analyze_robot_image",
+      "search_knowledge",
+      "get_robot_telemetry"
+    ],
+    "steps": [
+      {
+        "step_id": 1,
+        "tool_name": "analyze_robot_image",
+        "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
+        "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
+        "status": "success",
+        "error_code": null
+      },
+      {
+        "step_id": 2,
+        "tool_name": "search_knowledge",
+        "input_summary": "知识库检索；query_chars=29；top_k=3",
+        "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
+        "status": "success",
+        "error_code": null
+      },
+      {
+        "step_id": 3,
+        "tool_name": "get_robot_telemetry",
+        "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
+        "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
+        "status": "success",
+        "error_code": null
+      }
+    ]
+  },
+  "vision_observations": [
+    {
+      "step_id": 1,
+      "image_ref": "image_001",
+      "status": "completed",
+      "image_quality": "clear",
+      "observations": [
+        {
+          "description": "面板显示ERR-NET-4001",
+          "category": "visible_text",
+          "confidence": "high"
+        },
+        {
+          "description": "网络状态显示CONNECTED",
+          "category": "visible_text",
+          "confidence": "high"
+        },
+        {
+          "description": "任务状态显示PAUSED",
+          "category": "visible_text",
+          "confidence": "high"
+        }
+      ],
+      "requires_human_check": false,
+      "source": "vision_model",
+      "source_image_sha256": "992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+      "prompt_version": "fake-vision-observation-v1",
+      "model_name": "fake-vision-provider"
+    }
+  ],
+  "knowledge_evidence": [
+    {
+      "chunk_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+      "document_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+      "source_file": "仓储机器人故障说明.txt",
+      "page_or_section": "section: ERR-NET-4001",
+      "rank": 1,
+      "rrf_score": 0.0327,
+      "vector_similarity": 0.82,
+      "excerpt": "ERR-NET-4001 表示调度心跳超时。应检查无线信号、接入点漫游和车载网关状态。"
+    },
+    {
+      "chunk_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+      "document_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+      "source_file": "京东无人仓场景-仓储机器人测试规程与判定标准.md",
+      "page_or_section": "section: 京东无人仓公开场景下的仓储机器人测试规程与判定标准 > 10. 网络与调度测试 > 10.1 TEST-NET-001 调度心跳中断",
+      "rank": 2,
+      "rrf_score": 0.0323,
+      "vector_similarity": 0.79,
+      "excerpt": "通信恢复后不自动继续旧任务；RCS/RMS 完成状态核对并下发恢复命令后才能继续运行。"
+    }
+  ],
+  "telemetry_observations": [
+    {
+      "robot_id": "robot-001",
+      "observed_at": "2026-08-24T08:00:00Z",
+      "location": "warehouse-demo/aisle-07/node-14",
+      "battery_percent": 42.5,
+      "operational_state": "paused",
+      "current_task_id": "task-demo-1001",
+      "active_fault_codes": [
+        "ERR-NET-4001"
+      ],
+      "speed_mps": 0.0,
+      "network_connected": true,
+      "source": "simulated_memory"
+    }
+  ],
+  "diagnosis": {
+    "request_id": "offline-multimodal-agent-002",
+    "prompt_version": "offline-agent-tool-calling-v1",
+    "gate_version": "agent-confirmed-evidence-v1",
+    "status": "completed",
+    "symptoms": [
+      {
+        "description": "网络已连接但机器人保持暂停",
+        "source": "user_report"
+      },
+      {
+        "description": "ERR-NET-4001; speed_mps=0.0; network_connected=true",
+        "source": "log_excerpt"
+      }
+    ],
+    "possible_causes": [
+      {
+        "description": "现有知识证据支持所述故障现象和安全处理边界",
+        "evidence_chunk_ids": [
+          "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+          "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+        ]
+      }
+    ],
+    "next_checks": [],
+    "risk_level": "medium",
+    "missing_information": [],
+    "abstained": false
+  },
+  "progress_summary": {
+    "state": "completed",
+    "completed_capabilities": [
+      "vision_observation",
+      "knowledge_evidence",
+      "robot_telemetry"
+    ],
+    "confirmed_source_ids": [
+      "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+      "knowledge:dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+      "knowledge:5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+      "telemetry:simulated_memory:robot-001"
+    ],
+    "evidence_conflicts": [],
+    "stop_reason": "sufficient_evidence"
+  },
+  "validation": {
+    "request_succeeded": true,
+    "response_contract_valid": true,
+    "tool_selection_correct": true,
+    "tool_order_correct": true,
+    "vision_tool_selection_correct": true,
+    "matched_visual_observation_count": 3,
+    "expected_visual_observation_count": 3,
+    "matched_expected_evidence_count": 2,
+    "expected_evidence_count": 2,
+    "source_labels_correct": true,
+    "safety_requirements_passed": true,
+    "fixture_fully_consumed": true,
+    "scenario_passed": true
+  }
+}

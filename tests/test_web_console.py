@@ -1,4 +1,4 @@
-"""Week 6轻量Web控制台的离线集成测试。
+"""Week 7轻量Web控制台与SSE接入的离线集成测试。
 
 这些测试只通过ASGI接口读取本地静态文件，
 不会启动真实端口，也不会调用LLM、Vision、Embedding、
@@ -82,6 +82,12 @@ async def test_console_root_serves_html(
     assert 'id="diagnosis-result"' in html
     assert 'id="session-list"' in html
 
+    # Week 7新增区域必须允许用户看到实时事件，
+    # 并在不执行任何机器人控制的前提下停止等待连接。
+    assert 'id="stream-progress"' in html
+    assert 'id="stream-event-list"' in html
+    assert 'id="abort-stream-button"' in html
+
     # 图标使用内嵌SVG，浏览器不应再请求一个不存在的
     # /favicon.ico文件，也不会访问外部图标服务。
     assert 'rel="icon"' in html
@@ -159,10 +165,101 @@ async def test_console_script_is_served(
 
     script = response.text
 
-    assert "/api/v1/agent/diagnose" in script
+    assert (
+        "/api/v1/agent/diagnose/stream"
+        in script
+    )
     assert "/api/v1/diagnostic-sessions" in script
     assert ".textContent" in script
     assert ".innerHTML" not in script
+
+
+@pytest.mark.asyncio
+async def test_console_script_consumes_and_validates_sse(
+) -> None:
+    """控制台必须流式读取POST响应并校验终端事件。
+
+    预期流程：
+
+    1. fetch向流式POST接口发送JSON；
+    2. ReadableStream.getReader逐块读取字节；
+    3. TextDecoder按UTF-8恢复SSE文本；
+    4. 解析器核对id、event、sequence和event_type；
+    5. diagnosis_finished返回最终响应；
+    6. stream_error或提前断开显示明确失败状态。
+    """
+
+    async with create_test_client() as client:
+        response = await client.get(
+            SCRIPT_PATH,
+        )
+
+    assert response.status_code == 200
+    script = response.text
+
+    assert "response.body.getReader()" in script
+    assert 'new TextDecoder("utf-8")' in script
+    assert "parseAgentSseFrame" in script
+    assert "eventData.sequence" in script
+    assert "diagnosis_finished" in script
+    assert "stream_error" in script
+    assert "AbortController" in script
+    assert "最终结果返回前中断" in script
+
+
+@pytest.mark.asyncio
+async def test_console_exports_final_response_as_json_and_markdown(
+) -> None:
+    """两个导出按钮必须复用最终公开响应并生成本地文件。
+
+    预期流程：
+
+    1. diagnosis_finished或会话详情进入renderAgentResponse；
+    2. setExportResponse保存同一份公开响应并启用按钮；
+    3. JSON导出使用JSON.stringify保留机器可读结构；
+    4. Markdown导出整理状态、证据、观察和工具轨迹；
+    5. Blob和临时对象URL触发浏览器本地下载；
+    6. 导出内容不重新调用LLM，也不加入生成时间。
+    """
+
+    async with create_test_client() as client:
+        html_response = await client.get(
+            CONSOLE_PATH,
+        )
+        script_response = await client.get(
+            SCRIPT_PATH,
+        )
+
+    assert html_response.status_code == 200
+    assert script_response.status_code == 200
+
+    html = html_response.text
+    script = script_response.text
+
+    assert 'id="export-json-button"' in html
+    assert 'id="export-markdown-button"' in html
+    assert "latestAgentResponse" in script
+    assert "buildAgentDiagnosisMarkdown" in script
+    assert "JSON.stringify" in script
+    assert '"application/json"' in script
+    assert '"text/markdown"' in script
+    assert "new Blob(" in script
+    assert "URL.createObjectURL" in script
+    assert "URL.revokeObjectURL" in script
+
+    # 生成的Markdown应包含完整的公开来源分层，
+    # 而不是只导出最终状态或一段摘要。
+    for heading in (
+        "## 已报告症状",
+        "## 可能原因",
+        "## 后续检查",
+        "## 知识库引用",
+        "## 视觉观察",
+        "## 模拟遥测",
+        "## 测试草案",
+        "## 工具执行轨迹",
+    ):
+        assert heading in script
 
 
 @pytest.mark.asyncio
@@ -196,6 +293,9 @@ def test_openapi_keeps_api_routes_separate_from_console(
     ]
 
     assert "/api/v1/agent/diagnose" in (
+        openapi_paths
+    )
+    assert "/api/v1/agent/diagnose/stream" in (
         openapi_paths
     )
     assert "/api/v1/diagnostic-sessions" in (

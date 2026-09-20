@@ -120,6 +120,39 @@ def test_abstained_draft_accepts_safe_empty_conclusions() -> None:
     assert draft.risk_level == "unknown"
 
 
+def test_human_review_draft_accepts_safe_empty_conclusions() -> None:
+    """高风险请求可以不生成控制建议而直接转人工审核。"""
+
+    draft = AgentDiagnosisDraft(
+        status="human_review_required",
+        risk_level="high",
+        missing_information=(
+            "需要有权限和资质的人员确认现场安全状态",
+        ),
+        abstained=False,
+    )
+
+    assert draft.status == "human_review_required"
+    assert draft.possible_causes == ()
+    assert draft.next_checks == ()
+    assert draft.abstained is False
+
+
+def test_human_review_draft_requires_review_reason() -> None:
+    """转人工草稿必须说明为什么不能继续自动处理。"""
+
+    with pytest.raises(
+        ValidationError,
+        match="human_review_required草稿必须说明",
+    ):
+        AgentDiagnosisDraft(
+            status="human_review_required",
+            risk_level="high",
+            missing_information=(),
+            abstained=False,
+        )
+
+
 def test_draft_strips_text_and_converts_json_arrays_to_tuples() -> None:
     """模型应清理文本空白并把JSON数组转换成内部tuple。"""
 
@@ -165,6 +198,7 @@ def test_draft_rejects_model_generated_chunk_metadata() -> None:
         ("completed", True),
         ("partial", True),
         ("abstained", False),
+        ("human_review_required", True),
     ],
 )
 def test_draft_rejects_mismatched_status_and_abstained(

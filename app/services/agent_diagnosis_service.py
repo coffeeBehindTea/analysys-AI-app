@@ -25,12 +25,14 @@ from dataclasses import (
 from typing import Protocol
 
 from pydantic import (
-    BaseModel,
     ValidationError,
 )
 
 from app.agent.evidence_store import (
     ConfirmedEvidenceStore,
+)
+from app.agent.diagnosis_observer import (
+    AgentDiagnosisObserver,
 )
 from app.agent.request_safety_classifier import (
     AgentRequestSafetyClassifier,
@@ -40,6 +42,9 @@ from app.agent.request_tool_policy import (
 )
 from app.agent.progress_reducer import (
     AgentProgressReducer,
+)
+from app.agent.run_observer import (
+    AgentRunObserver,
 )
 from app.agent.vision_input_store import (
     RequestVisionInputStore,
@@ -82,6 +87,9 @@ from app.schemas.vision import (
 )
 from app.services.agent_diagnosis_report_builder import (
     build_agent_diagnosis_report_from_draft,
+)
+from app.services.agent_tool_trace_builder import (
+    build_agent_tool_trace,
 )
 from app.services.diagnostic_session_builder import (
     DiagnosticSessionBuilder,
@@ -171,8 +179,11 @@ class AgentRunnerProvider(Protocol):
         initial_progress: (
             AgentProgress | None
         ) = None,
+        observer: (
+            AgentRunObserver | None
+        ) = None,
     ) -> AgentRunResult:
-        """按当前请求的工具范围和初始进度运行循环。"""
+        """按工具范围运行循环，并可发送实时执行通知。"""
 
         ...
 
@@ -436,373 +447,6 @@ def _prepare_request_images(
     return tuple(prepared_images)
 
 
-def _compact_summary(
-    value: str,
-    *,
-    max_length: int,
-) -> str:
-    """把内部说明转换成短小的公开摘要。
-
-    split()会按任意空白切分，
-    再由单个空格连接，因此能够清除换行、
-    制表符和连续空格。
-
-    超过限制时只保留前部，并增加省略号。
-    """
-
-    compact = " ".join(
-        value.split()
-    )
-
-    if not compact:
-        compact = "无公开摘要"
-
-    if len(compact) > max_length:
-        return (
-            compact[: max_length - 1]
-            + "…"
-        )
-
-    return compact
-
-
-def _validate_success_output(
-    interaction: AgentToolInteraction,
-) -> BaseModel | None:
-    """重新校验一次成功工具结果。
-
-    ToolExecutor已经用工具的output_model校验过输出。
-    Service仍然进行第二次校验，是为了防御：
-
-    1. 单元测试中的FakeRunner；
-    2. 将来新增的Runner实现；
-    3. 错误持久化或反序列化后的数据；
-    4. 绕过ToolExecutor直接构造的AgentRunResult。
-
-    非success结果本来就没有output，因此返回None。
-    """
-
-    result = interaction.result
-
-    if result.status != "success":
-        return None
-
-    # 工具名与其正式输出数据契约的映射。
-    output_models: dict[
-        str,
-        type[BaseModel],
-    ] = {
-        "search_knowledge": (
-            SearchKnowledgeToolOutput
-        ),
-        "get_robot_telemetry": (
-            RobotTelemetryToolOutput
-        ),
-        "draft_test_case": (
-            DraftTestCaseToolOutput
-        ),
-        "get_current_time": (
-            GetCurrentTimeToolOutput
-        ),
-        "analyze_robot_image": (
-            VisionObservation
-        ),
-    }
-
-    output_model = output_models.get(
-        interaction.tool_call.tool_name
-    )
-
-    # 正常情况下所有已注册工具都会出现在映射中。
-    #
-    # 这里保留通用路径，避免轨迹转换代码
-    # 因未来新增工具立即失效。
-    if output_model is None:
-        return None
-
-    try:
-        # model_validate()接收字典并创建对应的
-        # Pydantic输出模型。
-        return output_model.model_validate(
-            result.output
-        )
-    except ValidationError as exc:
-        # success却无法通过输出契约属于程序边界错误，
-        # 不能把任意字典当成可信工具观察。
-        raise TypeError(
-            interaction.tool_call.tool_name
-            + "成功结果不符合输出契约"
-        ) from exc
-
-
-def _build_input_summary(
-    interaction: AgentToolInteraction,
-) -> str:
-    """生成一条工具输入的脱敏公开摘要。
-
-    这里不能直接序列化tool_call.arguments，
-    因为它可能包含：
-
-    1. 用户完整日志；
-    2. 检索问题；
-    3. 测试目标；
-    4. 其他敏感业务字段。
-
-    因此每个已知工具只公开必要的统计信息。
-    """
-
-    tool_name = (
-        interaction.tool_call.tool_name
-    )
-    arguments = (
-        interaction.tool_call.arguments
-    )
-
-    if tool_name == "search_knowledge":
-        query = arguments.get("query")
-
-        query_length = (
-            len(query)
-            if isinstance(query, str)
-            else 0
-        )
-
-        return _compact_summary(
-            (
-                "知识库检索；"
-                f"query_chars={query_length}；"
-                "top_k="
-                f"{arguments.get('top_k', 'default')}"
-            ),
-            max_length=500,
-        )
-
-    if tool_name == "get_robot_telemetry":
-        robot_id = arguments.get(
-            "robot_id"
-        )
-
-        public_robot_id = (
-            robot_id
-            if isinstance(robot_id, str)
-            else "invalid"
-        )
-
-        return _compact_summary(
-            (
-                "读取脱敏模拟遥测；"
-                f"robot_id={public_robot_id}"
-            ),
-            max_length=500,
-        )
-
-    if tool_name == "draft_test_case":
-        objective = arguments.get(
-            "objective"
-        )
-        evidence_ids = arguments.get(
-            "evidence_chunk_ids"
-        )
-
-        objective_length = (
-            len(objective)
-            if isinstance(objective, str)
-            else 0
-        )
-
-        evidence_count = (
-            len(evidence_ids)
-            if isinstance(
-                evidence_ids,
-                (list, tuple),
-            )
-            else 0
-        )
-
-        return _compact_summary(
-            (
-                "生成测试草案；"
-                "objective_chars="
-                f"{objective_length}；"
-                "evidence_count="
-                f"{evidence_count}"
-            ),
-            max_length=500,
-        )
-
-    if tool_name == "get_current_time":
-        return (
-            "读取应用服务器UTC时间；"
-            "无输入参数"
-        )
-
-    if tool_name == "analyze_robot_image":
-        image_ref = arguments.get(
-            "image_ref"
-        )
-        analysis_goal = arguments.get(
-            "analysis_goal"
-        )
-
-        public_image_ref = (
-            image_ref
-            if isinstance(image_ref, str)
-            else "invalid"
-        )
-
-        analysis_goal_length = (
-            len(analysis_goal)
-            if isinstance(
-                analysis_goal,
-                str,
-            )
-            else 0
-        )
-
-        return _compact_summary(
-            (
-                "分析请求级图片；"
-                f"image_ref={public_image_ref}；"
-                "analysis_goal_chars="
-                f"{analysis_goal_length}"
-            ),
-            max_length=500,
-        )
-
-    # 未专门适配的新工具只公开字段数量，
-    # 不公开字段名和值。
-    return _compact_summary(
-        (
-            "调用注册工具；"
-            "argument_fields="
-            f"{len(arguments)}"
-        ),
-        max_length=500,
-    )
-
-
-def _build_result_summary(
-    interaction: AgentToolInteraction,
-    typed_output: BaseModel | None,
-) -> str:
-    """生成工具结果的脱敏公开摘要。
-
-    成功结果只返回计数、状态等摘要，
-    不复制知识库回答、证据正文或完整遥测对象。
-    """
-
-    result = interaction.result
-
-    if result.status != "success":
-        public_message = (
-            result.public_message
-            or "工具未返回公开说明"
-        )
-
-        return _compact_summary(
-            (
-                f"status={result.status}；"
-                "error_code="
-                f"{result.error_code}；"
-                f"message={public_message}"
-            ),
-            max_length=1_000,
-        )
-
-    if isinstance(
-        typed_output,
-        SearchKnowledgeToolOutput,
-    ):
-        # 不公开answer和citation.excerpt，
-        # 只说明取得多少条已确认引用。
-        return _compact_summary(
-            (
-                "知识库返回"
-                f"{len(typed_output.citations)}条"
-                "已确认引用；"
-                "retrieval_ms="
-                f"{typed_output.retrieval_ms:.3f}"
-            ),
-            max_length=1_000,
-        )
-
-    if isinstance(
-        typed_output,
-        RobotTelemetryToolOutput,
-    ):
-        return _compact_summary(
-            (
-                "取得脱敏模拟遥测；"
-                f"robot_id={typed_output.robot_id}；"
-                "state="
-                f"{typed_output.operational_state}；"
-                "fault_count="
-                f"{len(typed_output.active_fault_codes)}"
-            ),
-            max_length=1_000,
-        )
-
-    if isinstance(
-        typed_output,
-        DraftTestCaseToolOutput,
-    ):
-        return _compact_summary(
-            (
-                "生成待人工批准测试草案；"
-                "step_count="
-                f"{len(typed_output.steps)}；"
-                "evidence_count="
-                f"{len(typed_output.evidence)}；"
-                "draft_only=true；"
-                "requires_human_approval=true"
-            ),
-            max_length=1_000,
-        )
-
-    if isinstance(
-        typed_output,
-        GetCurrentTimeToolOutput,
-    ):
-        # 不需要在轨迹重复完整时间值。
-        return (
-            "已读取应用服务器UTC系统时间"
-        )
-
-    if isinstance(
-        typed_output,
-        VisionObservation,
-    ):
-        return _compact_summary(
-            (
-                "取得结构化视觉观察；"
-                f"status={typed_output.status}；"
-                "image_quality="
-                f"{typed_output.image_quality}；"
-                "observation_count="
-                f"{len(typed_output.observations)}；"
-                "indicator_count="
-                f"{len(typed_output.visible_indicators)}；"
-                "requires_human_check="
-                f"{str(typed_output.requires_human_check).lower()}"
-            ),
-            max_length=1_000,
-        )
-
-    # 新工具尚未有专门摘要逻辑时，
-    # 只公开输出字段数量。
-    field_count = len(
-        result.output or {}
-    )
-
-    return _compact_summary(
-        (
-            "注册工具执行成功；"
-            f"output_fields={field_count}"
-        ),
-        max_length=1_000,
-    )
-
-
 def _collect_observations(
     run_result: AgentRunResult,
 ) -> tuple[
@@ -851,48 +495,20 @@ def _collect_observations(
     for interaction in (
         run_result.interactions
     ):
-        # success结果重新恢复成具体Pydantic模型。
-        typed_output = (
-            _validate_success_output(
-                interaction
-            )
+        # 公共构造器同时返回：
+        #
+        # 1. 已完成脱敏的公开轨迹；
+        # 2. 经过具体Pydantic模型重新校验的工具输出。
+        #
+        # SSE观察者也会调用同一个构造器，
+        # 因此实时事件和最终JSON不会形成两套摘要规则。
+        built_trace = build_agent_tool_trace(
+            interaction
         )
+        typed_output = built_trace.typed_output
 
         traces.append(
-            AgentToolTraceEvent(
-                step_id=(
-                    interaction.step_number
-                ),
-                tool_name=(
-                    interaction
-                    .tool_call
-                    .tool_name
-                ),
-                input_summary=(
-                    _build_input_summary(
-                        interaction
-                    )
-                ),
-                result_summary=(
-                    _build_result_summary(
-                        interaction,
-                        typed_output,
-                    )
-                ),
-                status=(
-                    interaction.result.status
-                ),
-                duration_ms=(
-                    interaction
-                    .result
-                    .duration_ms
-                ),
-                error_code=(
-                    interaction
-                    .result
-                    .error_code
-                ),
-            )
+            built_trace.trace
         )
 
         if isinstance(
@@ -1004,17 +620,27 @@ def _parse_final_draft(
             "不符合内部响应契约"
         ) from exc
 
-    task_completed = (
-        run_result.finish_reason
-        == "task_completed"
-    )
-    draft_completed = (
-        draft.status == "completed"
-    )
+    allowed_statuses_by_finish_reason = {
+        "task_completed": {
+            "completed",
+        },
+        "insufficient_information": {
+            "partial",
+            "abstained",
+        },
+        "human_review_required": {
+            "human_review_required",
+        },
+    }
 
-    # task_completed必须对应completed草稿；
-    # 信息不足或人工复核必须对应拒答草稿。
-    if task_completed != draft_completed:
+    # Service边界重复执行与Planner Provider相同的映射校验。
+    # Fake Runner、替代Provider或未来内部调用者即使绕过上游解析，
+    # 也不能把human_review_required伪装成普通abstained响应。
+    if draft.status not in (
+        allowed_statuses_by_finish_reason[
+            run_result.finish_reason
+        ]
+    ):
         raise InvalidLLMResponseError(
             "finish_reason与诊断草稿"
             "status不一致"
@@ -1042,6 +668,29 @@ def _make_abstained_draft(
             missing_information
         ),
         abstained=True,
+    )
+
+
+def _make_human_review_draft(
+    missing_information: tuple[
+        str,
+        ...,
+    ],
+) -> AgentDiagnosisDraft:
+    """根据稳定人工事项创建human_review_required草稿。
+
+    该草稿不把只读视觉观察自动升级成工程结论，也不生成控制
+    指令。它只保留“当前流程必须交给有权限人员”的独立业务终态，
+    避免旧逻辑把人工审核误写成普通证据不足拒答。
+    """
+
+    return AgentDiagnosisDraft(
+        status="human_review_required",
+        risk_level="unknown",
+        missing_information=(
+            missing_information
+        ),
+        abstained=False,
     )
 
 
@@ -1110,6 +759,43 @@ def _align_draft_with_progress(
             )
         )
     )
+
+    if (
+        progress.state
+        == "human_review_required"
+    ):
+        # Reducer根据真实执行进度确认人工审核时，公开状态必须
+        # 保留该安全语义。视觉观察仍通过response中的独立字段
+        # 返回，但这里不把观察自动改写成原因或操作步骤。
+        if not combined_missing_information:
+            combined_missing_information = (
+                "当前结果需要具备权限和资质的人员复核",
+            )
+
+        if (
+            draft.status
+            == "human_review_required"
+        ):
+            # 已通过草稿Schema校验的证据支持内容可以保留；
+            # 这里只把Reducer追加的人工复核事项合并进去。
+            draft_data = draft.model_dump(
+                mode="python"
+            )
+            draft_data[
+                "missing_information"
+            ] = combined_missing_information
+
+            return (
+                AgentDiagnosisDraft
+                .model_validate(draft_data)
+            )
+
+        # 兼容旧Provider把人工审核写成abstained的情况时，
+        # 不保留其未与新状态契约核对的原因或检查项，只安全转换
+        # 成不含控制指令的人工审核草稿。
+        return _make_human_review_draft(
+            combined_missing_information
+        )
 
     if (
         progress.state == "partial"
@@ -1269,8 +955,17 @@ def _build_policy_terminated_response(
         else "human_review_required"
     )
 
-    draft = _make_abstained_draft(
-        policy_decision.missing_information
+    draft = (
+        _make_abstained_draft(
+            policy_decision
+            .missing_information
+        )
+        if policy_decision.disposition
+        == "abstained"
+        else _make_human_review_draft(
+            policy_decision
+            .missing_information
+        )
     )
 
     diagnosis = (
@@ -1489,12 +1184,22 @@ class AgentDiagnosisService:
         self,
         request: AgentDiagnosisRequest,
         request_id: str,
+        *,
+        observer: (
+            AgentDiagnosisObserver | None
+        ) = None,
     ) -> AgentDiagnosisResponse:
         """执行诊断，并在启用存储时统一保存脱敏会话。
 
         公开方法只有一个返回出口，因此Planner前安全结束、
         普通完成、部分结果、拒答和人工审核都会进入同一套
         会话构造与持久化流程。
+
+        observer默认为None：
+
+        - 普通JSON接口不传Observer，保持原有同步响应行为；
+        - SSE编排层传入AgentDiagnosisObserver，Service发布
+          请求级与最终事件，Runner发布中间执行事件。
         """
 
         started_at = perf_counter()
@@ -1503,63 +1208,78 @@ class AgentDiagnosisService:
             self._diagnose_without_session_recording(
                 request,
                 request_id,
+                observer=observer,
             )
         )
 
         # 离线旧测试可以不启用持久化；生产依赖会同时
         # 注入Builder和Store，因此真实HTTP响应会有session_id。
         if (
-            self._session_builder is None
-            or self._session_store is None
+            self._session_builder is not None
+            and self._session_store is not None
         ):
-            return response
+            diagnosis_duration_ms = (
+                perf_counter() - started_at
+            ) * 1000.0
 
-        diagnosis_duration_ms = (
-            perf_counter() - started_at
-        ) * 1000.0
-
-        record = self._session_builder.build(
-            request=request,
-            response=response,
-            total_duration_ms=(
-                diagnosis_duration_ms
-            ),
-        )
-
-        # save()完成后才向客户端公开session_id。
-        # 如果写盘失败，异常会进入统一应用异常处理器，
-        # 不会返回一个实际上无法查询的虚假会话标识。
-        saved_record = await (
-            self._session_store.save(record)
-        )
-
-        if not isinstance(
-            saved_record,
-            type(record),
-        ):
-            raise TypeError(
-                "session_store.save必须返回"
-                "DiagnosticSessionRecord"
+            record = self._session_builder.build(
+                request=request,
+                response=response,
+                total_duration_ms=(
+                    diagnosis_duration_ms
+                ),
             )
 
-        # AgentDiagnosisResponse是frozen模型，不能直接赋值。
-        # 重新通过model_validate()构造响应，可以让UUID4字段
-        # 再经过Pydantic校验，而不是绕过契约修改内部数据。
-        response_data = response.model_dump(
-            mode="python"
-        )
-        response_data["session_id"] = (
-            saved_record.session_id
-        )
+            # save()完成后才向客户端公开session_id。
+            # 如果写盘失败，异常会交给SSE编排层转成
+            # stream_error，不能发布虚假的完成事件。
+            saved_record = await (
+                self._session_store.save(record)
+            )
 
-        return AgentDiagnosisResponse.model_validate(
-            response_data
-        )
+            if not isinstance(
+                saved_record,
+                type(record),
+            ):
+                raise TypeError(
+                    "session_store.save必须返回"
+                    "DiagnosticSessionRecord"
+                )
+
+            # AgentDiagnosisResponse是frozen模型，不能直接赋值。
+            # 重新通过model_validate()构造响应，可以让UUID4字段
+            # 再经过Pydantic校验，而不是绕过契约修改内部数据。
+            response_data = response.model_dump(
+                mode="python"
+            )
+            response_data["session_id"] = (
+                saved_record.session_id
+            )
+
+            response = (
+                AgentDiagnosisResponse.model_validate(
+                    response_data
+                )
+            )
+
+        # 最终事件只能在响应完成全部契约校验，且可选会话
+        # 已经成功保存后发布。这样SSE和普通JSON接口共享
+        # 同一份AgentDiagnosisResponse，不会出现双重结果。
+        if observer is not None:
+            await observer.on_diagnosis_finished(
+                response=response,
+            )
+
+        return response
 
     async def _diagnose_without_session_recording(
         self,
         request: AgentDiagnosisRequest,
         request_id: str,
+        *,
+        observer: (
+            AgentDiagnosisObserver | None
+        ) = None,
     ) -> AgentDiagnosisResponse:
         """执行一次完整Agent诊断并返回公开响应。
 
@@ -1595,6 +1315,16 @@ class AgentDiagnosisService:
             )
         )
 
+        # 该事件只公开图片数量和是否提供task_goal，
+        # 不公开图片Base64、症状正文或日志内容。
+        if observer is not None:
+            await observer.on_request_received(
+                image_count=len(request.images),
+                has_task_goal=(
+                    request.task_goal is not None
+                ),
+            )
+
         # 第一层前置边界：安全分类器只回答请求是否必须
         # 转人工审核。命中安全规则后不解码图片、不调用
         # Planner，也不执行任何工具。
@@ -1605,6 +1335,16 @@ class AgentDiagnosisService:
         )
 
         if policy_decision is not None:
+            if observer is not None:
+                await observer.on_safety_classified(
+                    disposition=(
+                        policy_decision.disposition
+                    ),
+                    reason_codes=(
+                        policy_decision.reason_codes
+                    ),
+                )
+
             return _build_policy_terminated_response(
                 request=request,
                 request_id=cleaned_request_id,
@@ -1625,6 +1365,16 @@ class AgentDiagnosisService:
                 request
             )
         )
+
+        if observer is not None:
+            await observer.on_safety_classified(
+                disposition=(
+                    policy_decision.disposition
+                ),
+                reason_codes=(
+                    policy_decision.reason_codes
+                ),
+            )
 
         if (
             policy_decision.disposition
@@ -1677,6 +1427,17 @@ class AgentDiagnosisService:
             in allowed_tool_names
         )
 
+        if observer is not None:
+            await observer.on_tool_scope_decided(
+                required_capabilities=(
+                    policy_decision
+                    .required_capabilities
+                ),
+                allowed_tool_names=(
+                    ordered_allowed_tool_names
+                ),
+            )
+
         task = build_agent_diagnosis_task(
             request,
             prepared_images=prepared_images,
@@ -1685,27 +1446,42 @@ class AgentDiagnosisService:
             ),
         )
 
-        # await暂停当前协程，
-        # 让事件循环可以同时处理其他请求。
-        run_result = await self._runner.run(
-            task,
-
-            # Runner会用同一集合同时缩小Planner可见Schema，
-            # 并要求Executor再次检查模型实际返回的工具名。
-            allowed_tool_names=(
-                allowed_tool_names
-            ),
-
-            # Progress只根据通过安全分类和工具策略校验的
-            # policy_decision创建。Runner后续只收窄它，不能
-            # 扩大本次请求的必要能力或工具权限。
-            initial_progress=(
-                AgentProgressReducer()
-                .create_initial_progress(
-                    policy_decision
-                )
-            ),
+        # Progress只根据通过安全分类和工具策略校验的
+        # policy_decision创建。Runner后续只收窄它，不能
+        # 扩大本次请求的必要能力或工具权限。
+        initial_progress = (
+            AgentProgressReducer()
+            .create_initial_progress(
+                policy_decision
+            )
         )
+
+        # 普通JSON路径保持原有调用形状，不向旧FakeRunner
+        # 额外传递observer关键字。SSE路径才把具体观察者
+        # 交给支持实时通知的AgentRunner。
+        #
+        # 两个分支都会await Runner，因此不会改变并发语义。
+        if observer is None:
+            run_result = await self._runner.run(
+                task,
+                allowed_tool_names=(
+                    allowed_tool_names
+                ),
+                initial_progress=(
+                    initial_progress
+                ),
+            )
+        else:
+            run_result = await self._runner.run(
+                task,
+                allowed_tool_names=(
+                    allowed_tool_names
+                ),
+                initial_progress=(
+                    initial_progress
+                ),
+                observer=observer,
+            )
 
         # Protocol主要用于静态类型检查。
         #

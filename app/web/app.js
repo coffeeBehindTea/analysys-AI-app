@@ -8,9 +8,10 @@ RobotOps Copilot Beta浏览器端控制器。
 1. 检查FastAPI服务是否可用；
 2. 校验用户填写的表单；
 3. 把浏览器File对象转换成VisionImagePayload；
-4. 调用POST /api/v1/agent/diagnose；
-5. 展示结构化诊断、引用、视觉观察和工具轨迹；
-6. 查询并展示最近保存的诊断会话。
+4. 调用POST /api/v1/agent/diagnose/stream；
+5. 解析并实时展示公开SSE事件；
+6. 展示结构化诊断、引用、视觉观察和工具轨迹；
+7. 查询并展示最近保存的诊断会话。
 
 本文件不决定Agent工具权限，不执行安全分类，
 也不允许绕过后端Pydantic和Python安全策略。
@@ -23,8 +24,8 @@ RobotOps Copilot Beta浏览器端控制器。
 
 const HEALTH_API_URL = "/health";
 
-const AGENT_DIAGNOSIS_API_URL =
-    "/api/v1/agent/diagnose";
+const AGENT_DIAGNOSIS_STREAM_API_URL =
+    "/api/v1/agent/diagnose/stream";
 
 const DIAGNOSTIC_SESSIONS_API_URL =
     "/api/v1/diagnostic-sessions";
@@ -42,6 +43,20 @@ const SUPPORTED_IMAGE_TYPES = new Set([
     "image/png",
     "image/webp",
 ]);
+
+// 一个合法Agent事件流只能由其中一种终端事件结束。
+const TERMINAL_AGENT_EVENT_TYPES = new Set([
+    "diagnosis_finished",
+    "stream_error",
+]);
+
+// 保存当前浏览器请求的取消控制器。
+// 新请求结束后会恢复成null，避免取消已经结束的请求。
+let activeDiagnosisAbortController = null;
+
+// 保存最近一次经过后端Schema校验的最终公开响应。
+// 两种导出格式都从这一份对象生成，避免页面展示与导出不一致。
+let latestAgentResponse = null;
 
 
 /* =========================================================
@@ -91,6 +106,21 @@ const elements = {
     resetButton:
         document.getElementById("reset-button"),
 
+    abortStreamButton:
+        document.getElementById(
+            "abort-stream-button"
+        ),
+
+    exportJsonButton:
+        document.getElementById(
+            "export-json-button"
+        ),
+
+    exportMarkdownButton:
+        document.getElementById(
+            "export-markdown-button"
+        ),
+
     resultPanel:
         document.querySelector(".result-panel"),
 
@@ -108,6 +138,19 @@ const elements = {
 
     errorRequestId:
         document.getElementById("error-request-id"),
+
+    streamProgress:
+        document.getElementById("stream-progress"),
+
+    streamConnectionStatus:
+        document.getElementById(
+            "stream-connection-status"
+        ),
+
+    streamEventList:
+        document.getElementById(
+            "stream-event-list"
+        ),
 
     diagnosisResult:
         document.getElementById("diagnosis-result"),
@@ -196,6 +239,23 @@ class ApiRequestError extends Error {
         this.statusCode = statusCode;
         this.requestId = requestId;
         this.responseData = responseData;
+    }
+}
+
+
+/*
+表示HTTP连接成功后，事件帧本身违反了SSE公开契约。
+
+它与ApiRequestError分开，是为了区分：
+
+1. 服务器返回了4xx或5xx；
+2. 网络连接中断；
+3. 收到的事件缺少id、event、data或字段互相矛盾。
+*/
+class AgentStreamProtocolError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "AgentStreamProtocolError";
     }
 }
 
@@ -843,6 +903,251 @@ async function requestJson(
 
 
 /* =========================================================
+   Agent SSE解析和消费
+   ========================================================= */
+
+function parseAgentSseFrame(rawFrame) {
+    const lines = rawFrame.split("\n");
+
+    let eventId = null;
+    let eventName = null;
+    const dataLines = [];
+
+    for (const line of lines) {
+        // SSE中以冒号开头的行是注释或心跳，
+        // 当前服务端没有使用，但客户端应安全忽略。
+        if (!line || line.startsWith(":")) {
+            continue;
+        }
+
+        if (line.startsWith("id:")) {
+            eventId = line.slice(3).trim();
+            continue;
+        }
+
+        if (line.startsWith("event:")) {
+            eventName = line.slice(6).trim();
+            continue;
+        }
+
+        if (line.startsWith("data:")) {
+            dataLines.push(
+                line.slice(5).trimStart()
+            );
+        }
+    }
+
+    if (
+        !eventId
+        || !eventName
+        || dataLines.length === 0
+    ) {
+        throw new AgentStreamProtocolError(
+            "诊断事件缺少id、event或data字段"
+        );
+    }
+
+    let eventData;
+
+    try {
+        // SSE允许一个事件含多个data行，
+        // 标准规定客户端应使用换行符把它们重新连接。
+        eventData = JSON.parse(
+            dataLines.join("\n")
+        );
+    } catch {
+        throw new AgentStreamProtocolError(
+            "诊断事件data不是合法JSON"
+        );
+    }
+
+    const numericEventId = Number(eventId);
+
+    if (
+        !Number.isInteger(numericEventId)
+        || numericEventId < 1
+        || eventData.sequence !== numericEventId
+    ) {
+        throw new AgentStreamProtocolError(
+            "SSE事件id与data.sequence不一致"
+        );
+    }
+
+    if (eventData.event_type !== eventName) {
+        throw new AgentStreamProtocolError(
+            "SSE event与data.event_type不一致"
+        );
+    }
+
+    return eventData;
+}
+
+
+async function requestAgentDiagnosisStream(
+    payload,
+    {
+        signal,
+        onEvent,
+    },
+) {
+    const response = await fetch(
+        AGENT_DIAGNOSIS_STREAM_API_URL,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "text/event-stream",
+            },
+            body: JSON.stringify(payload),
+            signal,
+        },
+    );
+
+    const responseRequestId =
+        response.headers.get("x-request-id");
+
+    if (!response.ok) {
+        const responseData =
+            await parseJsonResponse(response);
+
+        throw new ApiRequestError(
+            extractPublicErrorMessage(
+                responseData,
+                response.status,
+            ),
+            {
+                statusCode: response.status,
+                requestId:
+                    responseRequestId
+                    ?? responseData.request_id
+                    ?? null,
+                responseData,
+            },
+        );
+    }
+
+    const contentType =
+        response.headers.get("content-type")
+        ?? "";
+
+    if (!contentType.startsWith("text/event-stream")) {
+        throw new AgentStreamProtocolError(
+            "服务没有返回text/event-stream响应"
+        );
+    }
+
+    if (!response.body) {
+        throw new AgentStreamProtocolError(
+            "浏览器没有取得可读取的诊断事件流"
+        );
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+
+    let textBuffer = "";
+    let previousSequence = 0;
+
+    try {
+        while (true) {
+            const {
+                done,
+                value,
+            } = await reader.read();
+
+            textBuffer += decoder.decode(
+                value ?? new Uint8Array(),
+                {stream: !done},
+            );
+
+            // 服务端使用\n，代理也可能转换成\r\n。
+            // 归一化后统一以空行识别事件边界。
+            textBuffer = textBuffer.replace(
+                /\r\n/g,
+                "\n",
+            );
+
+            let frameBoundary =
+                textBuffer.indexOf("\n\n");
+
+            while (frameBoundary >= 0) {
+                const rawFrame = textBuffer.slice(
+                    0,
+                    frameBoundary,
+                );
+
+                textBuffer = textBuffer.slice(
+                    frameBoundary + 2
+                );
+
+                if (rawFrame.trim()) {
+                    const eventData =
+                        parseAgentSseFrame(rawFrame);
+
+                    if (
+                        eventData.sequence
+                        !== previousSequence + 1
+                    ) {
+                        throw new AgentStreamProtocolError(
+                            "诊断事件sequence没有连续递增"
+                        );
+                    }
+
+                    previousSequence =
+                        eventData.sequence;
+
+                    await onEvent(eventData);
+
+                    if (
+                        TERMINAL_AGENT_EVENT_TYPES.has(
+                            eventData.event_type
+                        )
+                    ) {
+                        if (
+                            eventData.event_type
+                            === "stream_error"
+                        ) {
+                            throw new ApiRequestError(
+                                eventData.error?.message
+                                ?? "诊断事件流执行失败",
+                                {
+                                    requestId:
+                                        eventData.request_id
+                                        ?? responseRequestId,
+                                    responseData:
+                                        eventData,
+                                },
+                            );
+                        }
+
+                        return eventData.response;
+                    }
+                }
+
+                frameBoundary =
+                    textBuffer.indexOf("\n\n");
+            }
+
+            if (done) {
+                break;
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
+
+    // 到达这里表示连接已经关闭，但没有收到唯一合法的
+    // diagnosis_finished或stream_error终端事件。
+    throw new ApiRequestError(
+        "诊断连接在最终结果返回前中断",
+        {
+            requestId: responseRequestId,
+        },
+    );
+}
+
+
+/* =========================================================
    结果区域状态切换
    ========================================================= */
 
@@ -855,6 +1160,9 @@ function setDiagnosisLoading(isLoading) {
 
     elements.refreshSessionsButton.disabled =
         isLoading;
+
+    elements.abortStreamButton.disabled =
+        !isLoading;
 
     elements.resultPanel.classList.toggle(
         "is-loading",
@@ -898,6 +1206,97 @@ function showDiagnosisResult() {
     elements.emptyState.hidden = true;
     elements.errorPanel.hidden = true;
     elements.diagnosisResult.hidden = false;
+}
+
+
+function prepareStreamProgress() {
+    clearElement(elements.streamEventList);
+
+    elements.streamProgress.hidden = false;
+    elements.streamConnectionStatus.textContent =
+        "正在建立SSE连接";
+}
+
+
+function describeAgentStreamEvent(eventData) {
+    if (eventData.event_type === "tool_started") {
+        return (
+            `${eventData.message}：`
+            + `${eventData.tool_name}`
+        );
+    }
+
+    if (eventData.event_type === "tool_finished") {
+        return (
+            `${eventData.message}：`
+            + `${eventData.trace?.tool_name ?? "未知工具"}`
+            + ` / ${eventData.trace?.status ?? "unknown"}`
+        );
+    }
+
+    if (eventData.event_type === "progress_updated") {
+        return (
+            `${eventData.message}：`
+            + `${eventData.progress?.state ?? "unknown"}`
+        );
+    }
+
+    if (eventData.event_type === "stream_error") {
+        return (
+            `${eventData.message}：`
+            + `${eventData.error?.message ?? "未知流错误"}`
+        );
+    }
+
+    return eventData.message;
+}
+
+
+function renderAgentStreamEvent(eventData) {
+    const item = document.createElement("li");
+    item.className = "stream-event-item";
+
+    item.append(
+        createTextElement(
+            "span",
+            `#${eventData.sequence}`,
+            "stream-event-sequence",
+        ),
+        createTextElement(
+            "span",
+            eventData.event_type,
+            "stream-event-type",
+        ),
+        createTextElement(
+            "span",
+            describeAgentStreamEvent(eventData),
+            "stream-event-message",
+        ),
+    );
+
+    elements.streamEventList.append(item);
+
+    if (
+        eventData.event_type
+        === "diagnosis_finished"
+    ) {
+        elements.streamConnectionStatus.textContent =
+            "事件流已正常结束";
+        elements.resultStatus.textContent =
+            "诊断结果已返回";
+        return;
+    }
+
+    if (eventData.event_type === "stream_error") {
+        elements.streamConnectionStatus.textContent =
+            "事件流因错误结束";
+        return;
+    }
+
+    elements.streamConnectionStatus.textContent =
+        `正在执行：${eventData.state}`;
+    elements.resultStatus.textContent =
+        eventData.message;
 }
 
 
@@ -1577,6 +1976,523 @@ function renderToolTrace(steps) {
 
 
 /* =========================================================
+   诊断结果导出
+   ========================================================= */
+
+function exportValue(value) {
+    if (
+        value === null
+        || value === undefined
+        || value === ""
+    ) {
+        return "—";
+    }
+
+    return String(value);
+}
+
+
+function escapeMarkdownTableCell(value) {
+    return exportValue(value)
+        .replace(/\|/g, "\\|")
+        .replace(/\r?\n/g, "<br>");
+}
+
+
+function markdownTableRow(values) {
+    return (
+        "| "
+        + values.map(
+            escapeMarkdownTableCell
+        ).join(" | ")
+        + " |"
+    );
+}
+
+
+function appendMarkdownStringList(
+    lines,
+    title,
+    values,
+    emptyMessage,
+) {
+    lines.push(`## ${title}`, "");
+
+    if (!Array.isArray(values) || values.length === 0) {
+        lines.push(emptyMessage, "");
+        return;
+    }
+
+    for (const value of values) {
+        lines.push(`- ${exportValue(value)}`);
+    }
+
+    lines.push("");
+}
+
+
+function appendMarkdownBlockquote(lines, value) {
+    const textLines = exportValue(value).split(
+        /\r?\n/
+    );
+
+    for (const line of textLines) {
+        lines.push(`> ${line}`);
+    }
+
+    lines.push("");
+}
+
+
+function buildAgentDiagnosisMarkdown(responseData) {
+    const diagnosis = responseData.diagnosis ?? {};
+    const execution = responseData.execution ?? {};
+    const lines = [
+        "# RobotOps Copilot 诊断报告",
+        "",
+        "> 本报告来自只读诊断系统。视觉观察不是知识库事实，测试草案投入使用前必须经过人工批准。",
+        "",
+        "## 执行摘要",
+        "",
+        "| 字段 | 值 |",
+        "|---|---|",
+        markdownTableRow([
+            "请求 ID",
+            responseData.request_id,
+        ]),
+        markdownTableRow([
+            "会话 ID",
+            responseData.session_id,
+        ]),
+        markdownTableRow([
+            "诊断状态",
+            diagnosis.status,
+        ]),
+        markdownTableRow([
+            "风险等级",
+            diagnosis.risk_level,
+        ]),
+        markdownTableRow([
+            "Agent状态",
+            execution.state,
+        ]),
+        markdownTableRow([
+            "终止原因",
+            execution.termination_reason,
+        ]),
+        markdownTableRow([
+            "结束语义",
+            execution.finish_reason,
+        ]),
+        markdownTableRow([
+            "Planner Prompt版本",
+            execution.planner_prompt_version,
+        ]),
+        markdownTableRow([
+            "证据门控版本",
+            diagnosis.gate_version,
+        ]),
+        "",
+        "## 已报告症状",
+        "",
+    ];
+
+    const symptoms = Array.isArray(
+        diagnosis.symptoms
+    ) ? diagnosis.symptoms : [];
+
+    if (symptoms.length === 0) {
+        lines.push("没有公开症状记录。", "");
+    } else {
+        for (const symptom of symptoms) {
+            lines.push(
+                `- ${exportValue(symptom.description)}`
+                + `（来源：${exportValue(symptom.source)}）`
+            );
+        }
+        lines.push("");
+    }
+
+    lines.push("## 可能原因", "");
+
+    const causes = Array.isArray(
+        diagnosis.possible_causes
+    ) ? diagnosis.possible_causes : [];
+
+    if (causes.length === 0) {
+        lines.push("没有经过证据支持的可能原因。", "");
+    } else {
+        for (const cause of causes) {
+            lines.push(
+                `- ${exportValue(cause.description)}`,
+                `  - 证据：${(
+                    cause.evidence_chunk_ids ?? []
+                ).join("、")}`
+            );
+        }
+        lines.push("");
+    }
+
+    lines.push("## 后续检查", "");
+
+    const checks = Array.isArray(
+        diagnosis.next_checks
+    ) ? diagnosis.next_checks : [];
+
+    if (checks.length === 0) {
+        lines.push("没有经过证据支持的后续检查。", "");
+    } else {
+        checks.forEach((check, index) => {
+            lines.push(
+                `${index + 1}. ${exportValue(check.description)}`,
+                `   - 风险：${exportValue(check.risk_level)}`,
+                `   - 需要有资质人员：${
+                    check.requires_qualified_person
+                        ? "是"
+                        : "否"
+                }`,
+                `   - 证据：${(
+                    check.evidence_chunk_ids ?? []
+                ).join("、")}`
+            );
+        });
+        lines.push("");
+    }
+
+    appendMarkdownStringList(
+        lines,
+        "缺失信息",
+        diagnosis.missing_information,
+        "当前结果没有声明缺失信息。",
+    );
+
+    lines.push("## 知识库引用", "");
+
+    const evidence = Array.isArray(
+        diagnosis.evidence
+    ) ? diagnosis.evidence : [];
+
+    if (evidence.length === 0) {
+        lines.push("本次结果没有知识库引用。", "");
+    } else {
+        for (const citation of evidence) {
+            lines.push(
+                `### 引用 ${exportValue(citation.rank)}：`
+                + `${exportValue(citation.source_file)}`,
+                "",
+                `- 位置：${exportValue(citation.page_or_section)}`,
+                `- Chunk ID：${exportValue(citation.chunk_id)}`,
+                `- RRF分数：${exportValue(citation.rrf_score)}`,
+                `- 向量相似度：${exportValue(citation.vector_similarity)}`,
+                "",
+                "证据原文：",
+                "",
+            );
+
+            // 引用块不会被证据正文中的反引号意外闭合。
+            appendMarkdownBlockquote(
+                lines,
+                citation.excerpt,
+            );
+        }
+    }
+
+    lines.push("## 视觉观察", "");
+
+    const visionObservations = Array.isArray(
+        responseData.vision_observations
+    ) ? responseData.vision_observations : [];
+
+    if (visionObservations.length === 0) {
+        lines.push("本次运行没有视觉观察。", "");
+    } else {
+        for (const item of visionObservations) {
+            const observation = item.observation ?? {};
+
+            lines.push(
+                `### 图片 ${exportValue(item.image_ref)}`,
+                "",
+                `- 工具步骤：${exportValue(item.step_id)}`,
+                `- 分析状态：${exportValue(observation.status)}`,
+                `- 图片质量：${exportValue(observation.image_quality)}`,
+                `- 来源：${exportValue(observation.source)}`,
+                `- 模型：${exportValue(observation.model_name)}`,
+                `- Prompt版本：${exportValue(observation.prompt_version)}`,
+                `- 图片SHA-256：${exportValue(observation.source_image_sha256)}`,
+                "",
+                "可见观察：",
+                "",
+            );
+
+            const visibleItems = [
+                ...(observation.observations ?? []).map(
+                    (visibleItem) => (
+                        `${visibleItem.description}`
+                        + `（${visibleItem.category}，`
+                        + `${visibleItem.confidence}）`
+                    ),
+                ),
+                ...(observation.visible_indicators ?? []).map(
+                    (indicator) => (
+                        `${indicator.label}：`
+                        + `${indicator.observed_state}`
+                        + `（${indicator.confidence}）`
+                    ),
+                ),
+            ];
+
+            if (visibleItems.length === 0) {
+                lines.push("- 没有可确认的视觉观察");
+            } else {
+                for (const visibleItem of visibleItems) {
+                    lines.push(`- ${visibleItem}`);
+                }
+            }
+
+            lines.push(
+                "",
+                `需要人工复核：${
+                    observation.requires_human_check
+                        ? "是"
+                        : "否"
+                }`,
+            );
+
+            if (
+                Array.isArray(observation.uncertain_items)
+                && observation.uncertain_items.length > 0
+            ) {
+                lines.push(
+                    `无法确认：${
+                        observation.uncertain_items.join("；")
+                    }`
+                );
+            }
+
+            lines.push("");
+        }
+    }
+
+    lines.push("## 模拟遥测", "");
+
+    const telemetry = Array.isArray(
+        responseData.telemetry_observations
+    ) ? responseData.telemetry_observations : [];
+
+    if (telemetry.length === 0) {
+        lines.push("本次运行没有读取模拟遥测。", "");
+    } else {
+        lines.push(
+            "| 机器人 | 来源 | 位置 | 状态 | 电量 | 速度 | 网络 | 当前任务 | 故障码 |",
+            "|---|---|---|---|---:|---:|---|---|---|",
+        );
+
+        for (const item of telemetry) {
+            lines.push(
+                markdownTableRow([
+                    item.robot_id,
+                    item.source,
+                    item.location,
+                    item.operational_state,
+                    `${item.battery_percent}%`,
+                    `${item.speed_mps} m/s`,
+                    item.network_connected
+                        ? "已连接"
+                        : "未连接",
+                    item.current_task_id,
+                    (item.active_fault_codes ?? []).join("、"),
+                ])
+            );
+        }
+
+        lines.push("");
+    }
+
+    lines.push("## 测试草案", "");
+
+    const drafts = Array.isArray(
+        responseData.test_case_drafts
+    ) ? responseData.test_case_drafts : [];
+
+    if (drafts.length === 0) {
+        lines.push("本次运行没有生成测试草案。", "");
+    } else {
+        for (const draft of drafts) {
+            lines.push(
+                `### ${exportValue(draft.title)}`,
+                "",
+                exportValue(draft.objective),
+                "",
+                `- 仅为草案：${draft.draft_only ? "是" : "否"}`,
+                `- 需要人工批准：${
+                    draft.requires_human_approval
+                        ? "是"
+                        : "否"
+                }`,
+                "",
+                "前置条件：",
+                "",
+            );
+
+            for (const precondition of draft.preconditions ?? []) {
+                lines.push(`- ${precondition}`);
+            }
+
+            lines.push("", "草案步骤：", "");
+
+            (draft.steps ?? []).forEach((step, index) => {
+                lines.push(
+                    `${index + 1}. ${step.action}`,
+                    `   - 预期观察：${step.expected_observation}`
+                );
+            });
+
+            lines.push("", "适用限制：", "");
+
+            for (const limitation of draft.limitations ?? []) {
+                lines.push(`- ${limitation}`);
+            }
+
+            lines.push("");
+        }
+    }
+
+    lines.push("## 工具执行轨迹", "");
+
+    const steps = Array.isArray(
+        execution.steps
+    ) ? execution.steps : [];
+
+    if (steps.length === 0) {
+        lines.push("本次运行没有执行工具。", "");
+    } else {
+        lines.push(
+            "| 步骤 | 工具 | 状态 | 输入摘要 | 结果摘要 | 耗时 | 错误码 |",
+            "|---:|---|---|---|---|---:|---|",
+        );
+
+        for (const step of steps) {
+            lines.push(
+                markdownTableRow([
+                    step.step_id,
+                    step.tool_name,
+                    step.status,
+                    step.input_summary,
+                    step.result_summary,
+                    formatDuration(step.duration_ms),
+                    step.error_code,
+                ])
+            );
+        }
+
+        lines.push("");
+    }
+
+    return lines.join("\n");
+}
+
+
+function buildExportBaseName(responseData) {
+    const rawIdentifier =
+        responseData.session_id
+        ?? responseData.request_id
+        ?? "diagnosis";
+
+    const safeIdentifier = String(rawIdentifier)
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .slice(0, 100);
+
+    return `robotops-diagnosis-${safeIdentifier}`;
+}
+
+
+function downloadTextFile(
+    filename,
+    content,
+    mimeType,
+) {
+    const blob = new Blob(
+        [content],
+        {type: `${mimeType};charset=utf-8`},
+    );
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = objectUrl;
+    link.download = filename;
+    link.hidden = true;
+
+    document.body.append(link);
+    link.click();
+    link.remove();
+
+    // click()已经把下载交给浏览器，下一轮事件循环即可释放URL。
+    setTimeout(
+        () => URL.revokeObjectURL(objectUrl),
+        0,
+    );
+}
+
+
+function setExportResponse(responseData) {
+    latestAgentResponse = responseData;
+
+    const exportAvailable = Boolean(responseData);
+
+    for (
+        const button
+        of [
+            elements.exportJsonButton,
+            elements.exportMarkdownButton,
+        ]
+    ) {
+        button.disabled = !exportAvailable;
+        button.hidden = !exportAvailable;
+    }
+}
+
+
+function exportLatestResponseAsJson() {
+    if (!latestAgentResponse) {
+        return;
+    }
+
+    const filename = (
+        `${buildExportBaseName(latestAgentResponse)}.json`
+    );
+
+    downloadTextFile(
+        filename,
+        JSON.stringify(
+            latestAgentResponse,
+            null,
+            2,
+        ),
+        "application/json",
+    );
+}
+
+
+function exportLatestResponseAsMarkdown() {
+    if (!latestAgentResponse) {
+        return;
+    }
+
+    const filename = (
+        `${buildExportBaseName(latestAgentResponse)}.md`
+    );
+
+    downloadTextFile(
+        filename,
+        buildAgentDiagnosisMarkdown(
+            latestAgentResponse
+        ),
+        "text/markdown",
+    );
+}
+
+
+/* =========================================================
    完整响应渲染
    ========================================================= */
 
@@ -1586,6 +2502,10 @@ function renderAgentResponse(responseData) {
 
     const execution =
         responseData.execution ?? {};
+
+    // 只有后端最终响应或会话详情会调用本函数。
+    // 保存这一对象后，JSON和Markdown导出使用相同数据源。
+    setExportResponse(responseData);
 
     showDiagnosisResult();
 
@@ -1887,31 +2807,40 @@ async function handleDiagnosisSubmit(event) {
     elements.emptyState.hidden = false;
     elements.diagnosisResult.hidden = true;
 
+    // 新请求开始时禁用旧结果的导出，
+    // 防止用户误把上一次诊断当成本次结果保存。
+    setExportResponse(null);
+
     elements.resultStatus.textContent =
         "正在执行Agent诊断…";
+
+    prepareStreamProgress();
+
+    // AbortController把“停止等待”按钮和当前fetch连接关联起来。
+    // signal只负责取消HTTP读取，不会产生机器人控制动作。
+    const abortController =
+        new AbortController();
+
+    activeDiagnosisAbortController =
+        abortController;
 
     try {
         const payload =
             await buildDiagnosisRequest();
 
         const responseData =
-            await requestJson(
-                AGENT_DIAGNOSIS_API_URL,
+            await requestAgentDiagnosisStream(
+                payload,
                 {
-                    method: "POST",
-                    headers: {
-                        "Content-Type":
-                            "application/json",
-
-                        Accept:
-                            "application/json",
-                    },
-
-                    body:
-                        JSON.stringify(payload),
+                    signal:
+                        abortController.signal,
+                    onEvent:
+                        renderAgentStreamEvent,
                 },
             );
 
+        // 最终页面仍复用原有完整响应渲染器。
+        // 前端不会根据中间事件自行拼装诊断结论。
         renderAgentResponse(responseData);
 
         /*
@@ -1920,13 +2849,36 @@ async function handleDiagnosisSubmit(event) {
         */
         await loadRecentSessions();
     } catch (error) {
+        let publicError = error;
+
+        if (
+            error instanceof DOMException
+            && error.name === "AbortError"
+        ) {
+            publicError = new ApiRequestError(
+                "诊断连接已由用户中断，未收到最终结果"
+            );
+
+            elements.streamConnectionStatus.textContent =
+                "连接已中断";
+        }
+
         console.error(
             "Diagnosis request failed:",
-            error,
+            publicError,
         );
 
-        showResultError(error);
+        showResultError(publicError);
     } finally {
+        // 只清理本次请求创建的Controller，
+        // 防止较早请求的finally覆盖后来请求的控制器。
+        if (
+            activeDiagnosisAbortController
+            === abortController
+        ) {
+            activeDiagnosisAbortController = null;
+        }
+
         setDiagnosisLoading(false);
     }
 }
@@ -1946,6 +2898,28 @@ elements.imageFiles.addEventListener(
     updateImageSummary,
 );
 
+elements.abortStreamButton.addEventListener(
+    "click",
+    () => {
+        if (activeDiagnosisAbortController) {
+            elements.streamConnectionStatus.textContent =
+                "正在中断连接…";
+
+            activeDiagnosisAbortController.abort();
+        }
+    },
+);
+
+elements.exportJsonButton.addEventListener(
+    "click",
+    exportLatestResponseAsJson,
+);
+
+elements.exportMarkdownButton.addEventListener(
+    "click",
+    exportLatestResponseAsMarkdown,
+);
+
 elements.form.addEventListener(
     "reset",
     () => {
@@ -1962,6 +2936,15 @@ elements.form.addEventListener(
 
                 elements.diagnosisResult.hidden =
                     true;
+
+                elements.streamProgress.hidden =
+                    true;
+
+                clearElement(
+                    elements.streamEventList
+                );
+
+                setExportResponse(null);
 
                 elements.emptyState.hidden =
                     false;

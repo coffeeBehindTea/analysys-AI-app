@@ -406,8 +406,10 @@ async def test_executor_stops_high_risk_request_before_images_and_planner(
         == "human_review_required"
     )
     assert response.execution.step_count == 0
-    assert response.diagnosis.status == "abstained"
-    assert response.diagnosis.abstained is True
+    assert response.diagnosis.status == (
+        "human_review_required"
+    )
+    assert response.diagnosis.abstained is False
     assert execution.planner_call_count == 0
     assert execution.vision_call_count == 0
     assert all(

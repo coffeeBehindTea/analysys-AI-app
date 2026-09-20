@@ -207,8 +207,8 @@ class DiagnosticSessionDiagnosisSnapshot(
 
     status: DiagnosisStatus = Field(
         description=(
-            "诊断报告的completed、partial"
-            "或abstained状态"
+            "诊断报告的completed、partial、"
+            "abstained或human_review_required状态"
         ),
     )
 
@@ -293,6 +293,21 @@ class DiagnosticSessionDiagnosisSnapshot(
 
             return self
 
+        # human_review_required是独立的安全业务终态，
+        # 不是证据不足拒答，也不表示已经形成诊断结论。
+        # 请求级安全策略可能在Planner和工具运行前直接转人工，
+        # 因此不能强制它携带知识证据、原因或检查项。
+        if self.status == "human_review_required":
+            if not self.missing_information:
+                raise ValueError(
+                    "human_review_required快照必须说明"
+                    "需要人工审核的原因"
+                )
+
+            return self
+
+        # completed与partial都声称形成了至少一部分诊断结论，
+        # 所以必须具有引用证据和被证据支持的原因或检查项。
         if not self.evidence:
             raise ValueError(
                 "非拒答快照必须包含引用证据"

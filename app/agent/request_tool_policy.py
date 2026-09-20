@@ -148,11 +148,15 @@ _CAPABILITY_PATTERNS: dict[
                 r".{0,16}"
                 r"(?:模拟遥测|遥测|实时位置|当前位置|"
                 r"当前电量|当前速度|当前任务|当前订单|"
-                r"机器人状态|网络连接状态)"
+                r"当前模拟状态|当前运行状态|当前设备状态|"
+                r"当前机器人状态|机器人状态|网络连接状态)"
             )
         ),
         re.compile(
-            r"(?:模拟遥测|实时遥测)"
+            (
+                r"(?:模拟遥测|实时遥测|"
+                r"当前模拟状态|当前运行状态)"
+            )
         ),
         re.compile(
             (
@@ -266,7 +270,8 @@ _CAPABILITY_EXCLUSION_PATTERNS: dict[
                 r".{0,8}"
                 r"(?:读取|查询|获取|使用)"
                 r".{0,8}"
-                r"(?:模拟遥测|遥测|实时状态)"
+                r"(?:模拟遥测|遥测|实时状态|"
+                r"当前模拟状态|当前运行状态|当前设备状态)"
             )
         ),
     ),
@@ -385,6 +390,45 @@ _IMAGE_FACET_PATTERNS: dict[
 }
 
 
+# 有些任务不会直接写“图片”或“连接器”，而会使用
+# “观察连接状态”“检查恢复许可是否可见”等表达。
+#
+# 只有请求确实携带图片、任务含有观察动作，并且图片声明的
+# analysis_goal与请求上下文不存在明显冲突时，这组规则才会
+# 补充vision_observation能力。它不会因为“附带了图片”就自动
+# 扩大工具范围。
+_IMAGE_BACKED_OBSERVATION_PATTERNS: tuple[
+    re.Pattern[str],
+    ...,
+] = (
+    re.compile(
+        (
+            r"(?:读取|观察|查看|识别|分析|检查|核对|判断|确认)"
+            r".{0,20}"
+            r"(?:状态|字段|数值|读数|许可|间隙|贴合|可见|不可见)"
+        )
+    ),
+    re.compile(
+        (
+            r"(?:read|inspect|observe|check|analy[sz]e)"
+            r".{0,24}"
+            r"(?:state|field|value|reading|permission|gap|visible)"
+        ),
+        re.IGNORECASE,
+    ),
+)
+
+
+# readability和numeric_panel描述的是“图片能不能读”以及
+# “图片里有某个数值”，不是电量、温度、连接器等具体业务主题。
+# 当图片只声明这些通用分面时，不能据此证明它与任务无关；
+# 应允许Vision实际观察，再由结构化结果报告unusable或不确定性。
+_GENERIC_IMAGE_FACETS = frozenset({
+    "readability",
+    "numeric_panel",
+})
+
+
 # 所需能力对应的稳定原因码。
 _CAPABILITY_REASON_CODES: dict[
     AgentRequiredCapability,
@@ -495,7 +539,7 @@ def _extract_image_facets(
 def _has_relevant_image(
     *,
     request: AgentDiagnosisRequest,
-    normalized_task_goal: str,
+    normalized_request_context: str,
 ) -> bool:
     """判断至少一张图片与任务目标不存在明显分面冲突。
 
@@ -512,7 +556,7 @@ def _has_relevant_image(
     """
 
     task_facets = _extract_image_facets(
-        normalized_task_goal
+        normalized_request_context
     )
 
     for image in request.images:
@@ -532,7 +576,98 @@ def _has_relevant_image(
         if task_facets & image_facets:
             return True
 
+        # 通用的“数值/可读性”分面不能单独证明图片无关。
+        # 例如任务问精确电量，而analysis_goal只声明“区分仍可见
+        # 的标签和被遮挡的具体数值”。这时应让Vision返回是否
+        # 可读，而不是在像素尚未观察前提前拒答。
+        task_specific_facets = (
+            task_facets
+            - _GENERIC_IMAGE_FACETS
+        )
+        image_specific_facets = (
+            image_facets
+            - _GENERIC_IMAGE_FACETS
+        )
+
+        if (
+            not task_specific_facets
+            or not image_specific_facets
+        ):
+            return True
+
     return False
+
+
+def _build_request_relevance_text(
+    request: AgentDiagnosisRequest,
+    /,
+) -> str:
+    """组合任务目标、现象和日志，供图片相关性判断使用。
+
+    task_goal决定用户要完成什么；symptom和log_excerpt补充当前
+    对象是什么。只看task_goal会把“观察连接状态”中的“连接”
+    错当成网络，而忽略日志里已经出现的J3 connector。
+    """
+
+    return _normalize_policy_text(
+        " ".join(
+            value
+            for value in (
+                request.task_goal,
+                request.symptom,
+                request.log_excerpt,
+            )
+            if value is not None
+        )
+    )
+
+
+def _vision_observation_is_required(
+    *,
+    request: AgentDiagnosisRequest,
+    normalized_task_goal: str,
+) -> bool:
+    """判断任务是否需要用当前请求图片完成可见观察。"""
+
+    # 明确“不读取图片”始终优先，图片本身不能覆盖用户限制。
+    if _matches_any(
+        normalized_task_goal,
+        _CAPABILITY_EXCLUSION_PATTERNS[
+            "vision_observation"
+        ],
+    ):
+        return False
+
+    # 直接写出图片、面板、连接器等对象时沿用原有明确规则。
+    if _matches_any(
+        normalized_task_goal,
+        _CAPABILITY_PATTERNS[
+            "vision_observation"
+        ],
+    ):
+        return True
+
+    # 没有图片时不能根据宽泛的“观察状态”推断视觉能力。
+    if not request.images:
+        return False
+
+    # 有图片但没有观察动作时仍不开放Vision。
+    if not _matches_any(
+        normalized_task_goal,
+        _IMAGE_BACKED_OBSERVATION_PATTERNS,
+    ):
+        return False
+
+    # 最后用完整请求上下文与图片analysis_goal进行分面核对。
+    # 该判断只排除明显无关图片，不声称已经理解图片内容。
+    return _has_relevant_image(
+        request=request,
+        normalized_request_context=(
+            _build_request_relevance_text(
+                request
+            )
+        ),
+    )
 
 
 def _detect_required_capabilities(
@@ -559,9 +694,17 @@ def _detect_required_capabilities(
         capability
         for capability
         in CAPABILITY_TO_TOOL
-        if _capability_is_required(
-            capability=capability,
-            task_goal=task_goal,
+        if (
+            _vision_observation_is_required(
+                request=request,
+                normalized_task_goal=task_goal,
+            )
+            if capability
+            == "vision_observation"
+            else _capability_is_required(
+                capability=capability,
+                task_goal=task_goal,
+            )
         )
     )
 
@@ -696,10 +839,9 @@ class AgentToolPolicy:
                 ),
             )
 
-        normalized_task_goal = (
-            _normalize_policy_text(
-                request.task_goal
-                or ""
+        normalized_request_context = (
+            _build_request_relevance_text(
+                request
             )
         )
 
@@ -710,8 +852,8 @@ class AgentToolPolicy:
             requires_vision
             and not _has_relevant_image(
                 request=request,
-                normalized_task_goal=(
-                    normalized_task_goal
+                normalized_request_context=(
+                    normalized_request_context
                 ),
             )
         ):

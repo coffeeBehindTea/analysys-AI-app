@@ -44,6 +44,9 @@ from app.agent.progress_reducer import (
     AgentProgressReducer,
     AgentProgressTransitionError,
 )
+from app.agent.run_observer import (
+    AgentRunObserver,
+)
 # Provider把SDK超时转换成LLMTimeoutError，
 # 把无法解析的模型响应转换成InvalidLLMResponseError。
 #
@@ -482,17 +485,56 @@ class AgentRunner:
         initial_progress: (
             AgentProgress | None
         ) = None,
+        observer: (
+            AgentRunObserver | None
+        ) = None,
     ) -> AgentRunResult:
         """在当前请求工具范围和进度内运行受控循环。
 
         initial_progress为None时保留旧调用行为；公开诊断链路
         会传入由请求级工具策略构造的collecting快照。
+
+        observer为None时不产生实时执行通知，保持普通JSON
+        诊断路径兼容；提供观察者时，Runner会按真实执行顺序
+        等待规划、工具和进度通知完成。
         """
 
         if not isinstance(task, str):
             raise TypeError(
                 "task必须是字符串"
             )
+
+        if observer is not None:
+            # Protocol主要用于静态类型检查。
+            # 运行时仍需检查四个方法确实由async def定义，
+            # 防止Runner在执行中途得到不可等待的返回值。
+            observer_method_names = (
+                "on_planning_started",
+                "on_tool_started",
+                "on_tool_finished",
+                "on_progress_updated",
+            )
+
+            invalid_observer_methods = tuple(
+                method_name
+                for method_name
+                in observer_method_names
+                if not iscoroutinefunction(
+                    getattr(
+                        observer,
+                        method_name,
+                        None,
+                    )
+                )
+            )
+
+            if invalid_observer_methods:
+                raise TypeError(
+                    "observer必须提供以下异步方法："
+                    + ", ".join(
+                        invalid_observer_methods
+                    )
+                )
 
         if (
             initial_progress is not None
@@ -720,6 +762,29 @@ class AgentRunner:
                 for schema in round_tool_schemas
             )
 
+            # 请求级策略声明的是任务必需能力，Reducer维护的是
+            # 尚未完成的能力。这里进一步区分“尚未完成”和
+            # “从未尝试”：工具返回empty、timeout或error后仍可
+            # 保留在允许集合中供Planner选择重试，但它已经获得过
+            # 一次真实执行机会，不应继续强制调用。
+            attempted_tool_names = frozenset(
+                interaction.tool_call.tool_name
+                for interaction in interactions
+            )
+
+            if progress is None:
+                must_attempt_tool_names: tuple[
+                    str,
+                    ...,
+                ] = ()
+            else:
+                must_attempt_tool_names = tuple(
+                    schema["function"]["name"]
+                    for schema in round_tool_schemas
+                    if schema["function"]["name"]
+                    not in attempted_tool_names
+                )
+
             # 保持旧的内部调用语义：调用方没有显式传入请求级
             # 范围，且本轮也没有发生动态收窄时，Executor继续
             # 接收None。这样注册表外名称仍被分类为unknown_tool，
@@ -749,6 +814,9 @@ class AgentRunner:
                 interactions=tuple(
                     interactions
                 ),
+                must_attempt_tool_names=(
+                    must_attempt_tool_names
+                ),
             )
 
             # Context虽然是frozen模型，
@@ -761,6 +829,21 @@ class AgentRunner:
                     deep=True
                 )
             )
+
+            if observer is not None:
+                # 只传递步骤号和本轮真实可见工具名。
+                # 不把完整任务、历史上下文或Planner私有输入
+                # 交给实时事件观察者。
+                await observer.on_planning_started(
+                    step_number=(
+                        context.next_step
+                    ),
+                    allowed_tool_names=tuple(
+                        schema["function"]["name"]
+                        for schema
+                        in round_tool_schemas
+                    ),
+                )
 
             try:
                 # asyncio.timeout限制的是当前这一轮
@@ -1168,6 +1251,23 @@ class AgentRunner:
                 # AgentToolProgressRecord，不再写入旧集合。
                 signature = None
 
+            tool_step_id = (
+                len(interactions) + 1
+            )
+
+            if observer is not None:
+                # 该通知位于权限、重复调用和参数检查之后，
+                # 但位于Executor之前，因此不会为被拦截的
+                # 工具请求错误发布tool_started。
+                await observer.on_tool_started(
+                    step_id=tool_step_id,
+                    tool_call=(
+                        executable_call.model_copy(
+                            deep=True
+                        )
+                    ),
+                )
+
             result = await (
                 self._executor.execute(
                     executable_call,
@@ -1182,13 +1282,27 @@ class AgentRunner:
                 )
             )
 
+            if observer is not None:
+                # ToolExecutor已经把异常、超时、拒绝和空结果
+                # 收敛成ToolExecutionResult，因此每一种状态都
+                # 会对应一次确定的工具结束通知。
+                await observer.on_tool_finished(
+                    step_id=tool_step_id,
+                    tool_call=(
+                        executable_call.model_copy(
+                            deep=True
+                        )
+                    ),
+                    result=result.model_copy(
+                        deep=True
+                    ),
+                )
+
             # 无论Executor返回success、empty、
             # rejected、timeout还是error，
             # 都先记录真实结果供下一轮Planner观察。
             interaction = AgentToolInteraction(
-                step_number=(
-                    len(interactions) + 1
-                ),
+                step_number=tool_step_id,
 
                 # 深复制可以避免后续对象持有者
                 # 修改Runner保存的历史。
@@ -1212,6 +1326,16 @@ class AgentRunner:
                         interaction,
                     )
                 )
+
+                if observer is not None:
+                    # 只有Reducer成功生成权威新快照后，
+                    # 才发布progress_updated。深复制防止具体
+                    # 观察者持有Runner内部进度对象的引用。
+                    await observer.on_progress_updated(
+                        progress=progress.model_copy(
+                            deep=True
+                        ),
+                    )
 
             interactions.append(interaction)
 

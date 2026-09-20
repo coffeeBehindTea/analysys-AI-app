@@ -94,6 +94,41 @@ def test_decide_allows_only_knowledge_for_rule_lookup(
     )
 
 
+def test_decide_recognizes_current_simulated_state_as_telemetry(
+) -> None:
+    """“当前模拟状态”必须映射到模拟遥测能力。
+
+    被测试模块是AgentToolPolicy.decide()（当前修改模块）。
+    测试输入同时要求核对故障原因、当前模拟状态和安全恢复
+    条件；前后两项工程知识由knowledge_evidence覆盖，中间的
+    实时模拟字段由robot_telemetry覆盖。预期策略按稳定顺序
+    返回search_knowledge和get_robot_telemetry，证明策略不会
+    再把宽泛但明确的当前状态请求漏成纯知识检索。
+    """
+
+    decision = AgentToolPolicy().decide(
+        make_request(
+            task_goal=(
+                "核对故障原因、当前模拟状态"
+                "和安全恢复条件"
+            ),
+        )
+    )
+
+    assert decision.required_capabilities == (
+        "knowledge_evidence",
+        "robot_telemetry",
+    )
+    assert decision.allowed_tool_names == (
+        "search_knowledge",
+        "get_robot_telemetry",
+    )
+    assert decision.reason_codes == (
+        "knowledge_evidence_required",
+        "robot_telemetry_required",
+    )
+
+
 def test_decide_maps_all_requested_capabilities_in_stable_order(
 ) -> None:
     """五项能力应映射成五个按注册顺序排列的工具。"""
@@ -397,6 +432,122 @@ def test_decide_supports_english_vision_and_knowledge_intent(
     assert decision.allowed_tool_names == (
         "analyze_robot_image",
         "search_knowledge",
+    )
+
+
+def test_decide_uses_request_context_for_generic_connection_observation(
+) -> None:
+    """“观察连接状态”应结合J3上下文开放Vision。
+
+    被测试模块是AgentToolPolicy.decide()中的视觉能力识别和
+    图片分面相关性判断。任务目标只写宽泛的“观察连接状态”，
+    但现象、日志和图片analysis_goal都明确指向J3连接器。
+
+    预期流程是：策略先从观察动作识别潜在视觉需求，再组合
+    task_goal、symptom和log_excerpt确认连接器分面，最后映射出
+    analyze_robot_image、search_knowledge和draft_test_case。该测试
+    防止008/029一类真实场景因为任务措辞不含“图片”而误拦Vision。
+    """
+
+    request = AgentDiagnosisRequest(
+        robot_id="robot-003",
+        symptom="需要为读码器连接间隙准备检查草案",
+        log_excerpt=(
+            "DM260 J3 connector visible gap; inspection only"
+        ),
+        task_goal=(
+            "观察连接状态、检索手册证据并生成只读检查草案；"
+            "不得带电插拔或控制设备"
+        ),
+        images=[
+            make_image(
+                "观察传感器插头、J3插座和锁紧环是否存在间隙"
+            ),
+        ],
+    )
+
+    decision = AgentToolPolicy().decide(
+        request
+    )
+
+    assert decision.required_capabilities == (
+        "vision_observation",
+        "knowledge_evidence",
+        "test_case_draft",
+    )
+    assert decision.allowed_tool_names == (
+        "analyze_robot_image",
+        "search_knowledge",
+        "draft_test_case",
+    )
+
+
+def test_decide_treats_visibility_check_as_image_observation(
+) -> None:
+    """“检查许可是否可见”应调用Vision后再决定是否拒答。
+
+    被测试模块是AgentToolPolicy.decide()（当前修改模块）。请求
+    携带一张analysis_goal声明遮挡检查的图片，任务要求判断恢复
+    许可是否可见。预期策略只开放analyze_robot_image，而不是在
+    尚未观察像素前错误开放search_knowledge或提前拒答。
+    """
+
+    request = AgentDiagnosisRequest(
+        robot_id="robot-001",
+        symptom="用户要求读取被遮挡的恢复许可字段",
+        log_excerpt="recovery permission value unavailable",
+        task_goal="检查恢复许可是否可见；不可见时不得批准恢复",
+        images=[
+            make_image(
+                "区分仍然可见的标签与已经被遮挡的具体数值"
+            ),
+        ],
+    )
+
+    decision = AgentToolPolicy().decide(
+        request
+    )
+
+    assert decision.required_capabilities == (
+        "vision_observation",
+    )
+    assert decision.allowed_tool_names == (
+        "analyze_robot_image",
+    )
+
+
+def test_decide_keeps_generic_unreadable_numeric_image_for_battery_task(
+) -> None:
+    """通用数值遮挡目标不能被误判为与电量任务无关。
+
+    被测试模块是AgentToolPolicy.decide()中的图片分面判断。任务
+    明确读取精确电量，图片analysis_goal只声明“具体数值是否被
+    遮挡”，没有重复写“电池”。预期流程仍允许Vision观察；后续
+    Vision可以返回unusable并触发安全拒答，而策略层不能在读取
+    图片前猜测该数值一定与电量无关。
+    """
+
+    request = AgentDiagnosisRequest(
+        robot_id="robot-001",
+        symptom="需要确认被遮挡的具体电量",
+        log_excerpt="battery value absent from log",
+        task_goal="读取图片中的精确电量；不可见时安全拒答",
+        images=[
+            make_image(
+                "区分仍然可见的标签与已经被遮挡的具体数值"
+            ),
+        ],
+    )
+
+    decision = AgentToolPolicy().decide(
+        request
+    )
+
+    assert decision.disposition == (
+        "continue_to_planner"
+    )
+    assert decision.allowed_tool_names == (
+        "analyze_robot_image",
     )
 
 

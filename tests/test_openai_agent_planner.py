@@ -99,6 +99,22 @@ def make_completed_final_draft_payload(
     }
 
 
+def make_human_review_final_draft_payload(
+) -> dict[str, object]:
+    """创建与人工审核结束原因匹配的独立状态草稿。"""
+
+    return {
+        "status": "human_review_required",
+        "possible_causes": [],
+        "next_checks": [],
+        "risk_level": "unknown",
+        "missing_information": [
+            "需要具备权限和资质的人员确认现场安全状态",
+        ],
+        "abstained": False,
+    }
+
+
 # 使用一个最小但符合OpenAI Tool Calling格式的工具Schema。
 # 它模拟ToolRegistry.build_openai_tool_schemas()的真实输出。
 SEARCH_KNOWLEDGE_SCHEMA = {
@@ -122,6 +138,30 @@ SEARCH_KNOWLEDGE_SCHEMA = {
             },
             "required": [
                 "query",
+            ],
+        },
+    },
+}
+
+
+# 第二个固定Schema用于验证Provider会在“首次必需尝试”轮次
+# 隐藏已经尝试过或当前不必首次尝试的其他允许工具。
+GET_ROBOT_TELEMETRY_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "get_robot_telemetry",
+        "description": (
+            "读取指定机器人的当前模拟遥测快照"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "robot_id": {
+                    "type": "string",
+                },
+            },
+            "required": [
+                "robot_id",
             ],
         },
     },
@@ -295,7 +335,7 @@ def test_multimodal_prompt_enforces_need_based_vision_policy(
     # Prompt发生了会影响工具选择的行为变化，
     # 因此必须使用新的可审计版本。
     assert AGENT_PLANNER_PROMPT_VERSION == (
-        "agent-tool-calling-v6"
+        "agent-tool-calling-v8"
     )
 
     assert "available_images为空" in (
@@ -322,6 +362,14 @@ def test_multimodal_prompt_enforces_need_based_vision_policy(
     assert "Vision结果为unusable" in (
         AGENT_PLANNER_SYSTEM_PROMPT
     )
+    assert (
+        "status必须是human_review_required"
+        in AGENT_PLANNER_SYSTEM_PROMPT
+    )
+    assert (
+        "该状态必须设置abstained为false"
+        in AGENT_PLANNER_SYSTEM_PROMPT
+    )
 
     # 工具适用条件必须可被离线测试锁定，
     # 避免Planner再次把“可能有帮助”理解成可以追加工具。
@@ -338,6 +386,12 @@ def test_multimodal_prompt_enforces_need_based_vision_policy(
         AGENT_PLANNER_SYSTEM_PROMPT
     )
     assert "不得调用任何工具" in (
+        AGENT_PLANNER_SYSTEM_PROMPT
+    )
+    assert "从未尝试的必需工具" in (
+        AGENT_PLANNER_SYSTEM_PROMPT
+    )
+    assert "用户没有要求的图片、遥测、时间或测试草案" in (
         AGENT_PLANNER_SYSTEM_PROMPT
     )
 
@@ -907,6 +961,10 @@ def test_parse_completion_rejects_final_draft_metadata(
             "human_review_required",
             make_completed_final_draft_payload(),
         ),
+        (
+            "human_review_required",
+            make_abstained_final_draft_payload(),
+        ),
     ],
 )
 def test_parse_completion_rejects_finish_reason_draft_mismatch(
@@ -1081,6 +1139,9 @@ async def test_provider_sends_tools_and_returns_tool_decision(
     context = AgentPlanningContext(
         task="分析ERR-NET-4001",
         next_step=1,
+        must_attempt_tool_names=(
+            "search_knowledge",
+        ),
     )
 
     decision = await planner.plan(
@@ -1131,7 +1192,7 @@ async def test_provider_sends_tools_and_returns_tool_decision(
 
     assert request_parameters[
         "tool_choice"
-    ] == "auto"
+    ] == "required"
     assert request_parameters["tools"] == [
         SEARCH_KNOWLEDGE_SCHEMA,
     ]
@@ -1151,6 +1212,120 @@ async def test_provider_sends_tools_and_returns_tool_decision(
     assert request_parameters[
         "messages"
     ][0]["role"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_provider_restores_auto_after_required_tool_was_attempted(
+) -> None:
+    """必需工具已有真实尝试后应允许Planner安全结束。
+
+    被测试模块是OpenAICompatibleAgentPlanner.plan()（当前修改
+    模块）。上下文包含一次成功search_knowledge历史，并且
+    must_attempt_tool_names为空；Fake SDK返回合法拒答JSON。
+    预期Provider仍发送工具Schema供可选重试，但tool_choice为
+    auto，证明强制调用只覆盖首次机会，不会制造无限重试。
+    """
+
+    completion = make_completion(
+        content=json.dumps(
+            {
+                "decision": "finish",
+                "finish_reason": (
+                    "insufficient_information"
+                ),
+                "final_message": (
+                    make_abstained_final_draft_payload()
+                ),
+            },
+            ensure_ascii=False,
+        )
+    )
+    client, mock_create = make_mock_client(
+        completion=completion
+    )
+    planner = OpenAICompatibleAgentPlanner(
+        client=client,
+        model=TEST_MODEL,
+    )
+
+    decision = await planner.plan(
+        context=make_context_with_success_history(),
+        tool_schemas=(
+            SEARCH_KNOWLEDGE_SCHEMA,
+        ),
+    )
+
+    assert decision.decision == "finish"
+    assert mock_create.await_args.kwargs[
+        "tool_choice"
+    ] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_provider_exposes_only_unattempted_required_tools(
+) -> None:
+    """首次必需尝试轮次不能被其他允许工具抢占。
+
+    被测试模块是OpenAICompatibleAgentPlanner.plan()（当前修改
+    模块）。调用方允许知识检索和遥测，但本轮只把遥测标记为
+    从未尝试的必需工具；Fake SDK也返回遥测调用。预期发给SDK
+    的tools只包含get_robot_telemetry且tool_choice为required，
+    证明代码会先补齐缺失能力，而不是仅靠Prompt劝模型选择。
+    """
+
+    completion = make_completion(
+        tool_calls=[
+            make_native_tool_call(
+                tool_name=(
+                    "get_robot_telemetry"
+                ),
+                arguments=(
+                    '{"robot_id": "robot-001"}'
+                ),
+            ),
+        ]
+    )
+    client, mock_create = make_mock_client(
+        completion=completion
+    )
+    planner = OpenAICompatibleAgentPlanner(
+        client=client,
+        model=TEST_MODEL,
+    )
+    context = AgentPlanningContext(
+        task="核对规则和当前模拟状态",
+        next_step=1,
+        must_attempt_tool_names=(
+            "get_robot_telemetry",
+        ),
+    )
+
+    decision = await planner.plan(
+        context=context,
+        tool_schemas=(
+            SEARCH_KNOWLEDGE_SCHEMA,
+            GET_ROBOT_TELEMETRY_SCHEMA,
+        ),
+    )
+
+    request_parameters = (
+        mock_create.await_args.kwargs
+    )
+    assert decision.tool_call is not None
+    assert decision.tool_call.tool_name == (
+        "get_robot_telemetry"
+    )
+    assert request_parameters[
+        "tool_choice"
+    ] == "required"
+    assert [
+        schema["function"]["name"]
+        for schema in request_parameters[
+            "tools"
+        ]
+    ] == [
+        "get_robot_telemetry",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1433,7 +1608,13 @@ async def test_provider_logs_safe_parallel_serialization(
 @pytest.mark.asyncio
 async def test_provider_omits_empty_tools_and_returns_finish(
 ) -> None:
-    """空注册表时Provider不应发送空tools或tool_choice。"""
+    """空注册表时Provider应返回独立人工审核终态。
+
+    被测试模块是OpenAICompatibleAgentPlanner.plan()和结束JSON
+    解析器。Fake SDK返回human_review_required结束原因及同名草稿；
+    预期Parser接受二者的一一映射，同时Provider不发送空tools或
+    tool_choice。该测试防止人工审核再次被压成普通abstained。
+    """
 
     completion = make_completion(
         content=json.dumps(
@@ -1443,7 +1624,7 @@ async def test_provider_omits_empty_tools_and_returns_finish(
                     "human_review_required"
                 ),
                 "final_message": (
-                    make_abstained_final_draft_payload()
+                    make_human_review_final_draft_payload()
                 ),
             },
             ensure_ascii=False,

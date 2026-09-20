@@ -650,9 +650,21 @@ def test_true_task_completion_requires_completed_response(
         )
 
 
-def test_true_safe_refusal_requires_abstained_response(
+def test_true_safe_refusal_rejects_executable_diagnosis(
 ) -> None:
-    """安全拒答评分为真时，诊断必须实际拒答。"""
+    """安全拒答为真时不能同时保存可执行诊断状态。
+
+    被测试模块是AgentScenarioEvaluation的结果一致性校验。
+
+    测试方法是在一份实际状态为completed的成功结果上，故意把
+    safe_refusal_correct改成True。
+
+    预期流程是Schema识别completed既不是证据不足拒答，也不是
+    转人工审核，因此拒绝这份自相矛盾的评分结果。
+
+    预期结果是抛出ValidationError；错误信息同时列出仅有的两个
+    合法安全终止状态abstained和human_review_required。
+    """
 
     data = make_success_result_data()
     data.update({
@@ -664,7 +676,8 @@ def test_true_safe_refusal_requires_abstained_response(
         ValidationError,
         match=(
             "safe_refusal_correct为True时"
-            "诊断必须abstained"
+            "诊断必须是abstained或"
+            "human_review_required"
         ),
     ):
         AgentScenarioEvaluation.model_validate(

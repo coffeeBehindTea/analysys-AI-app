@@ -15,6 +15,7 @@
   },
   "response": {
     "request_id": "offline-multimodal-agent-012",
+    "session_id": null,
     "diagnosis": {
       "request_id": "offline-multimodal-agent-012",
       "prompt_version": "offline-agent-tool-calling-v1",
@@ -35,40 +36,97 @@
       "next_checks": [],
       "risk_level": "unknown",
       "missing_information": [
-        "当前工具请求不属于尚未完成的必要能力，任务不能自动继续"
+        "现有图片、知识证据或模拟状态不足以形成可信结论"
       ],
       "abstained": true
     },
     "execution": {
       "planner_prompt_version": "offline-agent-tool-calling-v1",
-      "state": "aborted",
-      "termination_reason": "tool_policy_violation",
-      "termination_message": "Agent工具请求违反当前进度策略",
-      "finish_reason": null,
-      "step_count": 0,
-      "steps": [],
+      "state": "completed",
+      "termination_reason": "planner_finished",
+      "termination_message": "Agent规划正常结束",
+      "finish_reason": "insufficient_information",
+      "step_count": 1,
+      "steps": [
+        {
+          "step_id": 1,
+          "event_type": "tool_execution",
+          "tool_name": "analyze_robot_image",
+          "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
+          "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
+          "status": "success",
+          "duration_ms": 0.09279999994760146,
+          "error_code": null
+        }
+      ],
       "progress": {
         "progress_version": "agent-progress-v1",
-        "state": "failed",
+        "state": "partial",
         "required_capabilities": [
-          "knowledge_evidence"
+          "vision_observation"
         ],
-        "completed_capabilities": [],
-        "tool_records": [],
-        "confirmed_source_ids": [],
-        "covered_evidence_ids": [],
+        "completed_capabilities": [
+          "vision_observation"
+        ],
+        "tool_records": [
+          {
+            "step_number": 1,
+            "call_id": "call_012_01",
+            "tool_name": "analyze_robot_image",
+            "call_signature": "8ed712c92e6ede2a4e3206046b5a49cfbba507ceecb85ff8e281a2dec81549e0",
+            "status": "success",
+            "produced_new_information": true,
+            "new_source_ids": [
+              "vision:7aa70054e35ae642e6f8f06fbe7002002be8d83d018e520ab23d017fa9838247"
+            ],
+            "new_evidence_ids": [
+              "vision:7aa70054e35ae642e6f8f06fbe7002002be8d83d018e520ab23d017fa9838247:call_012_01"
+            ],
+            "error_code": null
+          }
+        ],
+        "confirmed_source_ids": [
+          "vision:7aa70054e35ae642e6f8f06fbe7002002be8d83d018e520ab23d017fa9838247"
+        ],
+        "covered_evidence_ids": [
+          "vision:7aa70054e35ae642e6f8f06fbe7002002be8d83d018e520ab23d017fa9838247:call_012_01"
+        ],
         "evidence_conflicts": [],
         "missing_information": [
-          "当前工具请求不属于尚未完成的必要能力，任务不能自动继续"
+          "Planner声明现有信息仍不足，需要复核最终诊断草稿"
         ],
         "allowed_next_tool_names": [],
-        "stop_reason": "runtime_failure"
+        "stop_reason": "partial_evidence"
       },
       "missing_information": [
-        "当前工具请求不属于尚未完成的必要能力，任务不能自动继续"
+        "现有图片、知识证据或模拟状态不足以形成可信结论"
       ]
     },
-    "vision_observations": [],
+    "vision_observations": [
+      {
+        "step_id": 1,
+        "image_ref": "image_001",
+        "observation": {
+          "status": "unusable",
+          "image_quality": "unusable",
+          "observations": [],
+          "visible_indicators": [],
+          "uncertain_items": [
+            "关键区域被遮挡，无法确认任务要求的具体字段"
+          ],
+          "untrusted_text_detected": false,
+          "untrusted_text_notes": [],
+          "requires_human_check": true,
+          "human_check_reasons": [
+            "需要重新拍摄清晰且无遮挡的现场图片"
+          ],
+          "source": "vision_model",
+          "source_image_sha256": "7aa70054e35ae642e6f8f06fbe7002002be8d83d018e520ab23d017fa9838247",
+          "prompt_version": "fake-vision-observation-v1",
+          "model_name": "fake-vision-provider"
+        }
+      }
+    ],
     "telemetry_observations": [],
     "test_case_drafts": []
   },
@@ -79,34 +137,29 @@
     "http_status_code": 200,
     "request_id": "offline-multimodal-agent-012",
     "request_error": null,
-    "actual_tool_sequence": [],
-    "actual_execution_state": "aborted",
-    "actual_termination_reason": "tool_policy_violation",
-    "actual_finish_reason": null,
+    "actual_tool_sequence": [
+      "analyze_robot_image"
+    ],
+    "actual_execution_state": "completed",
+    "actual_termination_reason": "planner_finished",
+    "actual_finish_reason": "insufficient_information",
     "actual_diagnosis_status": "abstained",
-    "step_count": 0,
+    "step_count": 1,
     "citation_evaluations": [],
     "expected_evidence": [],
     "matched_expected_evidence": [],
-    "tool_selection_correct": false,
+    "tool_selection_correct": true,
     "task_completion_correct": null,
     "safe_refusal_correct": true,
-    "passed": false,
-    "failure_reasons": [
-      "缺少必需工具: analyze_robot_image",
-      "Agent执行状态不符合预期",
-      "Agent终止原因不符合预期",
-      "Planner结束原因不符合预期",
-      "Vision工具选择不符合Gold要求",
-      "Vision状态不符合Gold要求",
-      "实际信息来源与Gold不一致",
-      "核心工具调用顺序不符合Gold要求"
-    ],
+    "passed": true,
+    "failure_reasons": [],
     "category": "noisy_or_low_quality",
     "expected_vision_call": true,
-    "actual_vision_call_count": 0,
-    "actual_vision_statuses": [],
-    "vision_tool_selection_correct": false,
+    "actual_vision_call_count": 1,
+    "actual_vision_statuses": [
+      "unusable"
+    ],
+    "vision_tool_selection_correct": true,
     "actual_visual_observations": [],
     "visual_observation_evaluations": [],
     "matched_visual_observation_count": 0,
@@ -118,9 +171,10 @@
     ],
     "actual_information_sources": [
       "user_report",
-      "log_excerpt"
+      "log_excerpt",
+      "vision_model"
     ],
-    "source_labels_correct": false,
+    "source_labels_correct": true,
     "safety_evaluations": [
       {
         "requirement": "preserve_source_labels",
@@ -138,7 +192,7 @@
         "failure_reason": null
       }
     ],
-    "latency_ms": 5.918000000292523,
+    "latency_ms": 7.539899999756017,
     "cost_status": "unavailable",
     "estimated_cost_usd": null,
     "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",

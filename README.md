@@ -2,17 +2,17 @@
 
 一个面向机器人研发场景的工程文档 RAG、证据约束结构化诊断、受控工具调用与多模态现场图片分析服务。
 
-项目支持摄取公开或脱敏的 PDF、Markdown 和 TXT 文档，将文档切分、向量化并持久化到 ChromaDB；用户可以通过自然语言查询知识库，获得只基于检索证据生成的回答和可定位到原始文件、页码或章节的引用。Week 3 在此基础上增加确定性查询归一化、关键词与向量混合检索、RRF 融合、头部保留重排、组合证据门控和结构化诊断 API。Week 4 进一步增加受控 Robot Diagnostic Agent，使模型只能通过注册表中的只读工具完成多步诊断任务。Week 5 将现场图片安全地接入同一个 Agent。Week 6 增加请求级工具策略、确定性安全分类、证据驱动进度状态、30 场景离线回归、脱敏诊断会话、轻量控制台和 Docker 可复现运行。
+项目支持摄取公开或脱敏的 PDF、Markdown 和 TXT 文档，将文档切分、向量化并持久化到 ChromaDB；用户可以通过自然语言查询知识库，获得只基于检索证据生成的回答和可定位到原始文件、页码或章节的引用。Week 3 在此基础上增加确定性查询归一化、关键词与向量混合检索、RRF 融合、头部保留重排、组合证据门控和结构化诊断 API。Week 4 进一步增加受控 Robot Diagnostic Agent，使模型只能通过注册表中的只读工具完成多步诊断任务。Week 5 将现场图片安全地接入同一个 Agent。Week 6 增加请求级工具策略、确定性安全分类、证据驱动进度状态、30 场景离线回归、脱敏诊断会话、轻量控制台和 Docker 可复现运行。Week 7 将这些能力收敛为 RobotOps Copilot MVP，增加 Agent SSE 生命周期、四类公开终止状态、实时控制台展示、会话导出和完整端到端交付记录。
 
 项目同时保留 Week 1 的普通故障分诊与 SSE 接口、Week 2 的文档管理和知识库问答，以及 Week 3 的固定结构化诊断链路，用于比较普通 LLM、RAG 问答、证据约束诊断、文本 Agent 和多模态 Agent 之间的职责差异。
 
 > 本项目是 AI 应用工程学习项目，不是生产级机器人控制或安全认证系统。所有诊断、维修和安全操作仍需由具备资质的人员依据设备原厂资料确认。
 
-> 当前开发阶段：Week 6 任务 1～6 已完成。Agent 在 Planner 之前执行确定性安全分类和请求级最小工具策略，在每次工具结果之后由 `AgentProgressReducer` 更新已完成能力、证据覆盖、缺失信息和下一步工具范围。图片先经过本地格式与资源上限校验，再以原生多模态 message content 进入 Vision Provider；完整图片不会写入公开响应、会话记录和评测轨迹。
+> 当前开发阶段：Week 7 RobotOps Copilot MVP 主链路与交付验收已完成。Agent 在 Planner 之前执行确定性安全分类和请求级最小工具策略，在每次工具结果之后由 `AgentProgressReducer` 更新已完成能力、证据覆盖、缺失信息和下一步工具范围。图片先经过本地格式与资源上限校验，再以原生多模态 message content 进入 Vision Provider；完整图片不会写入公开响应、会话记录和评测轨迹。
 >
-> Week 6 固定 Fixture 离线回归达到：严格通过 `26/30`、严格通过率 `0.867`、工具选择正确率 `0.867`、任务完成率 `0.875`、引用正确率 `1.000`、引用覆盖率 `0.952`、图片观察字段准确性 `0.886`、来源标注正确率 `0.867`、安全拒答率 `1.000`。该结果超过 `24/30` 门槛且没有安全回退，但它验证的是确定性框架，不代表真实 LLM 或 Vision 的线上准确率。
+> Week 7 固定 Fixture 离线回归达到：严格通过 `30/30`、严格通过率 `1.000`、工具选择正确率 `1.000`、任务完成率 `1.000`、引用正确率 `1.000`、引用覆盖率 `1.000`、图片观察字段准确性 `1.000`、来源标注正确率 `1.000`、安全拒答率 `1.000`。第六周遗留的 `008`、`012`、`019`、`029` 已全部闭环。该结果验证的是确定性框架，不代表真实 LLM 或 Vision 的线上准确率。
 >
-> 当前完整 Python 回归为 `2514 passed`。Week 6 的实现、测试口径、Docker 验证和限制见 [Week 6 工程总结](docs/工程总结_week6.md) 与 [多模态 Agent 离线回归](docs/multimodal-offline-regression.md)；历史架构与评测资料继续保留在 `docs/` 中。
+> 当前完整 Python 回归为 `2623 passed`。Week 7 的范围、架构、接口、测试口径和 Docker 验证见 [MVP 方案](docs/project-proposal.md)、[系统架构](docs/architecture.md)、[API 契约](docs/api-contract.md)、[端到端测试计划](docs/e2e-test-plan.md)、[端到端场景结果](docs/e2e-scenario-results.md) 与 [Docker 启动记录](docs/docker-startup-record.md)；历史工程总结与评测资料继续保留在 `docs/` 中。
 
 ## 1. 核心能力
 
@@ -66,7 +66,10 @@
 - `AgentProgressReducer` 记录已完成能力、工具结果、已确认来源、证据覆盖、冲突、缺失信息和下一步允许工具，并阻止越权或重复调用。
 - 30 条场景使用 Fake Planner、Fake Vision 和固定 Fixture 执行确定性离线回归，区分框架稳定性与真实模型概率性表现。
 - 每次诊断都生成脱敏会话记录；可以查询最近会话或按 `session_id` 查看工具轨迹、终止原因、视觉观察、引用和运行指标。
-- `/console/` 提供轻量演示页面；Docker Compose 提供应用、健康检查、ChromaDB 和会话目录绑定挂载的一键本地启动方式。
+- Agent 公开 `completed`、`partial`、`abstained` 和 `human_review_required` 四种诊断状态；高风险请求可以先完成允许的只读观察，但最终必须转人工审核。
+- `POST /api/v1/agent/diagnose/stream` 通过 SSE 依次公开请求接收、安全分类、工具范围、规划、工具开始/结束、进度更新和最终诊断；流开始后的技术错误使用 `stream_error` 结束。
+- `/console/` 实时展示 SSE 状态、工具轨迹、视觉观察、来源分层、引用和终止原因，并支持会话 JSON 或 Markdown 导出。
+- Docker Compose 提供应用、健康检查、ChromaDB 和会话目录绑定挂载的一键本地启动方式。
 
 ### Vision、OCR 与视觉证据边界
 
@@ -270,7 +273,7 @@ received
 | `pytesseract` | 调用本地 Tesseract OCR，建立纯文字面板识别基线 |
 | `python-multipart` | 解析 FastAPI 文件上传请求 |
 | `httpx` | 异步 HTTP 客户端和 API 测试 |
-| `sse-starlette` | Week 1 故障分诊 SSE 流式响应 |
+| `sse-starlette` | Week 1 故障分诊与 Week 7 Agent 生命周期 SSE 流式响应 |
 | `pytest` | 自动化测试框架 |
 | `pytest-asyncio` | 执行异步测试 |
 
@@ -289,16 +292,16 @@ LLM、Embedding 和 Vision 可以使用不同的服务商、密钥、Base URL �
 
 自动化测试通过 Fake、Mock、依赖覆盖和临时 Chroma 目录运行，不需要真实 API Key，也不应访问外部网络。
 
-当前离线回归覆盖 Week 1～5 的全部既有功能和 Week 6 的工具策略、安全分类、进度状态、离线回归、会话、控制台与容器装配，共 `2514` 项：
+当前离线回归覆盖 Week 1～6 的全部既有功能，以及 Week 7 的四类公开状态、Agent SSE 事件、流式服务、控制台实时展示、会话导出和端到端交付边界，共 `2623` 项：
 
 ```text
-tests    : 2514
+tests    : 2623
 failures : 0
 errors   : 0
 skipped  : 0
 ```
 
-这组结果来自完成 Week 6 修改后的完整本地回归，不是根据测试文件数量推算。自动化测试使用 Fake Provider、固定 Fixture、Mock HTTP、FastAPI 依赖覆盖和临时目录，不需要真实 API Key，也不应访问外部网络。
+这组结果来自完成 Week 7 修改后的完整本地回归，不是根据测试文件数量推算。自动化测试使用 Fake Provider、固定 Fixture、Mock HTTP、FastAPI 依赖覆盖和临时目录，不需要真实 API Key，也不应访问外部网络。
 
 ## 5. 创建环境并安装依赖
 
@@ -714,6 +717,12 @@ curl.exe -i "http://127.0.0.1:8000/health"
 
 ![RobotOps Copilot Docker 本地演示](docs/robotops-copilot-docker-demo.png)
 
+下面的第二张截图展示 Week 7 Agent SSE 生命周期。高风险请求依次产生
+`request_received`、`safety_classified` 和 `diagnosis_finished`，最终进入
+`human_review_required`，没有调用或暴露真实设备控制工具：
+
+![RobotOps Copilot SSE 人工审核演示](docs/robotops-copilot-sse-human-review.png)
+
 查看容器日志：
 
 ```powershell
@@ -743,7 +752,7 @@ docker compose down
 ```
 
 该命令不会删除上述绑定挂载中的 Chroma 和诊断会话数据，
-也不会删除已经构建的 `robotops-copilot:week6` 镜像。
+也不会删除已经构建的 `robotops-copilot:week7` 镜像。
 再次启动时执行 `docker compose up --detach` 即可；
 只有 Dockerfile 或依赖发生变化时才需要再次添加 `--build`。
 
@@ -758,6 +767,9 @@ docker compose down
 | `POST` | `/api/v1/knowledge/query` | 检索并根据证据回答 |
 | `POST` | `/api/v1/diagnostics` | 根据真实检索证据生成结构化诊断 |
 | `POST` | `/api/v1/agent/diagnose` | 通过受控多步工具调用生成可审计诊断 |
+| `POST` | `/api/v1/agent/diagnose/stream` | 以 SSE 流式返回 Agent 生命周期、工具轨迹和最终诊断 |
+| `GET` | `/api/v1/diagnostic-sessions` | 列出最近脱敏诊断会话 |
+| `GET` | `/api/v1/diagnostic-sessions/{session_id}` | 查询一条完整脱敏诊断会话 |
 | `POST` | `/api/v1/triage` | Week 1 普通故障分诊 |
 | `POST` | `/api/v1/triage/stream` | Week 1 SSE 流式故障分诊 |
 
@@ -1452,20 +1464,20 @@ python -m scripts.evaluate_multimodal `
 运行全部测试并生成最终机器可读报告。`pytest.ini` 会自动把测试临时目录固定到项目内的 `.pytest_tmp`：
 
 ```powershell
-# 运行Week 1至Week 6的全部离线测试。
+# 运行Week 1至Week 7的全部离线测试。
 python -m pytest
 ```
 
-当前源码在完成 Week 6 全部任务后的最终完整回归结果为 `2514 passed`：
+当前源码在完成 Week 7 全部功能修改后的最终完整回归结果为 `2623 passed`：
 
 ```text
-tests    : 2514
+tests    : 2623
 failures : 0
 errors   : 0
 skipped  : 0
 ```
 
-上述数字来自完成 Week 6 修改后的完整本地回归，不是从 `.pytest_cache` 或测试文件数量推算得到。回归同时覆盖 Week 1 至 Week 5 的既有功能，以及 Week 6 的请求级工具策略、安全分类、进度状态、30 场景离线回归、会话持久化、查询 API、Web 控制台和 Docker 依赖装配。
+上述数字来自完成 Week 7 功能修改后的完整本地回归，不是从 `.pytest_cache` 或测试文件数量推算得到。回归覆盖 Week 1 至 Week 6 的既有功能，以及 Week 7 的四类公开诊断状态、Agent SSE 事件契约、事件发布器、Runner Observer、流式诊断 Service、SSE Router、控制台事件消费和端到端交付边界。
 
 核心测试使用：
 
@@ -1525,7 +1537,11 @@ skipped  : 0
 - `AgentProgress` 的能力完成、工具记录、证据覆盖、冲突、缺失信息和下一步工具范围。
 - 30 条场景 Fixture 的加载、Gold 配对、Fake 执行、消费审计、严格评分和安全回退门槛。
 - 脱敏诊断会话的构造、原子存储、最近列表、按 ID 查询和不存在会话错误。
-- Web 控制台页面与静态资源挂载，以及 Docker 依赖装配和最终完整回归。
+- 四种公开诊断状态及 `human_review_required` 的跨层一致性。
+- Agent SSE 事件的 sequence、判别联合、公开字段、唯一终止事件和 UTF-8 编码。
+- Streaming Service、Runner SSE Observer、流开始后的 `stream_error` 和客户端断开边界。
+- Web 控制台的实时事件消费、失败状态、JSON/Markdown 导出和静态资源挂载。
+- Docker 依赖装配、非 root 用户、健康检查和最终完整回归。
 
 ## 18. 项目结构
 
@@ -1654,8 +1670,14 @@ analysys-AI-app/
 │   ├── agent-trace-samples.md
 │   ├── corpus-sources.md
 │   ├── architecture.md
+│   ├── api-contract.md
+│   ├── project-proposal.md
 │   ├── diagnostic-session-sample.json
 │   ├── diagnosis-schema.md
+│   ├── docker-startup-record.md
+│   ├── e2e-run-sample.json
+│   ├── e2e-scenario-results.md
+│   ├── e2e-test-plan.md
 │   ├── multimodal-evaluation.md
 │   ├── multimodal-scenarios.md
 │   ├── multimodal-tool-selection.md
@@ -1716,25 +1738,32 @@ analysys-AI-app/
 - 当前五个 Agent 工具全部只读，不包含机器人控制、任务下发、远程命令、数据修改或真实测试执行能力。
 - `draft_test_case` 使用确定性模板生成待人工批准草案，不是已经执行的测试，也不能替代设备原厂规程和现场风险评估。
 - Planner 依赖外部生成式 LLM。兼容服务可能一次建议多个工具；当前单步 ReAct 循环只选择第一个工具执行，再根据观察重新规划，因此服务端可能出现 `agent_planner_parallel_tool_calls_serialized` 警告。
-- Week 6 固定 Fixture 离线回归的严格通过率为 `0.867`，安全拒答率为 `1.000`；四条失败场景仍涉及 Vision 工具范围、终止状态、来源标注或人工审核语义。离线结果只验证确定性框架，不能替代真实 Planner 和 Vision 抽样评测，也不能视为生产就绪证明。
+- Week 7 固定 Fixture 离线回归的严格通过率和安全拒答率均为 `1.000`，第六周四条遗留场景已经闭环；离线结果只验证固定 Planner 决策、Fake Vision 和固定工具输出下的确定性框架，不能替代真实 Planner 和 Vision 抽样评测，也不能视为生产就绪证明。
 - Vision 输出是概率性视觉观察，不等于经过仪器校准、人工确认或知识库支持的工程事实；低质量、遮挡、反光和小字图片仍可能产生漏读或误读。
 - 本地 OCR 依赖操作系统中的 Tesseract 可执行文件和语言数据。OCR 置信度是引擎提供的识别信号，不是内容真实性或工程结论正确率。
 - 当前请求把图片作为 Base64 放入 JSON，虽然便于教学和 Schema 校验，但会增加请求体体积；生产系统通常需要受控对象存储、短期签名引用和独立上传流程。
 - 当前没有取得真实模型 Token usage，成本只能标记为无法估算，不能把空成本当作零成本。
 - `execution.state="completed"` 只表示 Agent 编排流程和诊断草稿完成，不表示任何现场检查、维修、复位、测试或设备控制已经执行。
-- 当前 Agent 接口使用普通 JSON 响应并等待本次循环结束；虽然已经提供脱敏会话与独立轨迹查询，但仍没有流式进度、断点恢复或后台任务队列。
+- Agent 已提供 SSE 流式生命周期和控制台实时展示，但当前没有断点续传、事件重放、跨进程任务恢复或后台任务队列；客户端断开后不能从某个事件序号继续同一次执行。
 - Prompt 是软约束，模型输出仍需经过 Schema、代码规则和人工审核。
 - 安全关键操作不能只依赖 LLM 回答执行。
 - 当前轻量 Web 控制台和 Docker Compose 只用于本地教学演示；系统仍没有身份认证、多用户隔离、TLS、生产密钥管理、集中日志、备份和多实例部署能力。
-- SSE 只用于 Week 1 故障分诊，知识库查询当前使用普通 JSON 响应。
+- SSE 用于 Week 1 故障分诊和 Week 7 Agent 诊断生命周期；知识库查询接口仍使用普通 JSON 响应。
 
 ## 20. 进一步阅读
 
+- [Week 7 工程总结](docs/工程总结_week7.md)
+- [Week 7 MVP 方案](docs/project-proposal.md)
+- [Week 7 API 契约](docs/api-contract.md)
+- [Week 7 端到端测试计划](docs/e2e-test-plan.md)
+- [Week 7 端到端场景结果](docs/e2e-scenario-results.md)
+- [Week 7 Docker 启动记录](docs/docker-startup-record.md)
+- [Week 7 完整脱敏运行样本](docs/e2e-run-sample.json)
+- [Week 7 多模态 Agent 离线回归](docs/multimodal-offline-regression.md)
 - [Week 6 工程总结](docs/工程总结_week6.md)
-- [Week 6 多模态 Agent 离线回归](docs/multimodal-offline-regression.md)
-- [Week 6 最终 JUnit 回归报告](docs/pytest-results-week6-final.xml)
-- [脱敏诊断会话样例](docs/diagnostic-session-sample.json)
+- [Week 6 最终 JUnit 回归报告](docs/pytest-results-week6-final.xml)（历史基线：`2514 passed`；Week 7 当前完整回归：`2623 passed`）
 - [RobotOps Copilot Docker 演示截图](docs/robotops-copilot-docker-demo.png)
+- [RobotOps Copilot SSE 人工审核演示截图](docs/robotops-copilot-sse-human-review.png)
 - [Week 5 工程总结](docs/工程总结_week5.md)
 - [多模态 Agent 可靠性评测](docs/multimodal-evaluation.md)
 - [多模态工具选择对照实验](docs/multimodal-tool-selection.md)

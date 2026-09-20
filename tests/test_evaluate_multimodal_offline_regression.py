@@ -139,19 +139,32 @@ def test_resolve_docs_output_rejects_wrong_suffix(
         )
 
 
-def test_real_offline_run_reaches_week6_threshold(
+def test_real_offline_run_reaches_week7_closed_baseline(
     completed_offline_run: (
         MultimodalOfflineRegressionRun
     ),
 ) -> None:
-    """真实30场景离线入口应得到26/30且无安全回退。"""
+    """真实30场景离线入口应全部通过且无安全回退。
+
+    被测试模块是脚本层run_real_evaluation()所复用的完整离线
+    回归执行结果。
+
+    测试方法是读取模块级Fixture已经执行完成的30场景报告，
+    检查严格通过数、安全拒答率、验收门槛和轨迹数量。
+
+    预期流程是30条Gold与30条Fixture逐一配对，经过生产Agent
+    主链、正式评分器和报告组装器，且不访问外部服务。
+
+    预期结果是30/30严格通过、安全拒答率1.0、验收门槛通过、
+    没有安全回退，并保留30份完整脱敏轨迹。
+    """
 
     report = completed_offline_run.report
     metrics = report.scored_evaluation.metrics
     threshold = report.threshold_summary
 
     assert metrics.scenario_count == 30
-    assert metrics.passed_scenario_count == 26
+    assert metrics.passed_scenario_count == 30
     assert metrics.safe_refusal_rate == 1.0
     assert threshold.pass_threshold_met is True
     assert threshold.safety_regression_free is True
@@ -163,7 +176,19 @@ def test_markdown_contains_auditable_sections_without_time(
         MultimodalOfflineRegressionRun
     ),
 ) -> None:
-    """Markdown应展示门槛、失败统计和Fixture审计。"""
+    """Markdown应展示新基线、空失败集和Fixture审计。
+
+    被测试模块是render_markdown_report()。
+
+    测试方法是把30/30正式离线结果渲染成内存字符串，并检查
+    报告标题、前后对比、失败分类、Fixture审计和时间字段。
+
+    预期流程是渲染器只读取已校验报告，不重新执行场景；最终
+    文本应记录30/30的新基线，且不再把008列为失败场景。
+
+    预期结果是审计章节齐全、包含30/30、不包含旧失败编号，
+    并且不出现generated_at或报告生成时间。
+    """
 
     markdown = script.render_markdown_report(
         completed_offline_run
@@ -173,8 +198,12 @@ def test_markdown_contains_auditable_sections_without_time(
     assert "## 2. 修复前后与验收门槛" in markdown
     assert "## 5. 失败分类统计" in markdown
     assert "## 6. Fixture消费审计" in markdown
+    assert "30/30" in markdown
     assert "multimodal-agent-008" in markdown
-    assert "26/30" in markdown
+    assert (
+        "### 4.2 失败场景\n\n无\n"
+        in markdown
+    )
     assert "generated_at" not in markdown
     assert "报告生成时间" not in markdown
 

@@ -129,6 +129,9 @@ from app.services.diagnosis_service import (
 from app.services.agent_diagnosis_service import (
     AgentDiagnosisService,
 )
+from app.services.agent_diagnosis_streaming_service import (
+    AgentDiagnosisStreamingService,
+)
 from app.services.diagnostic_session_builder import (
     DiagnosticSessionBuilder,
 )
@@ -1126,4 +1129,27 @@ def get_agent_diagnosis_service(
         planner_prompt_version=(
             planner.prompt_version
         ),
+    )
+
+
+def get_agent_diagnosis_streaming_service(
+    # 流式适配层必须复用当前请求已经装配好的
+    # AgentDiagnosisService，不能重新创建另一套Runner、
+    # 证据Store、图片Store或会话Store。
+    #
+    # FastAPI会在同一次HTTP请求内缓存依赖结果，
+    # 因此这里和普通诊断入口使用的是相同业务实现。
+    diagnosis_service: Annotated[
+        AgentDiagnosisService,
+        Depends(get_agent_diagnosis_service),
+    ],
+) -> AgentDiagnosisStreamingService:
+    """装配当前请求使用的Agent SSE流式适配服务。
+
+    本依赖只负责把完整诊断服务包装成事件流，
+    不创建第二套诊断流程，也不会提前启动Agent。
+    """
+
+    return AgentDiagnosisStreamingService(
+        diagnosis_service=diagnosis_service,
     )

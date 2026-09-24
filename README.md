@@ -33,7 +33,7 @@
 - [项目复盘](docs/project-retrospective.md)：架构取舍、失败案例、反过拟合策略和后续方向。
 - [演示脚本](docs/demo-script.md)：2–3 分钟录屏流程和 3–5 分钟项目讲解提纲。
 - [简历描述](docs/resume-description.md)：可验证的简历要点。
-- [完整演示视频](https://github.com/coffeeBehindTea/analysys-AI-app/releases/latest/download/robotops-copilot-demo.mp4)：作为 GitHub Release Asset 发布，不写入普通 Git 历史。
+- [完整演示视频](https://github.com/coffeeBehindTea/analysys-AI-app/releases/latest/download/robotops-copilot-demo.mp4)：作为 GitHub Release Asset 发布，需下载。
 - [正常诊断截图](docs/robotops-copilot-docker-demo.png)与[人工审核截图](docs/robotops-copilot-sse-human-review.png)。
 
 项目支持摄取公开或脱敏的 PDF、Markdown 和 TXT 文档，将文档切分、向量化并持久化到 ChromaDB；用户可以通过自然语言查询知识库，获得只基于检索证据生成的回答和可定位到原始文件、页码或章节的引用。Week 3 在此基础上增加确定性查询归一化、关键词与向量混合检索、RRF 融合、头部保留重排、组合证据门控和结构化诊断 API。Week 4 进一步增加受控 Robot Diagnostic Agent，使模型只能通过注册表中的只读工具完成多步诊断任务。Week 5 将现场图片安全地接入同一个 Agent。Week 6 增加请求级工具策略、确定性安全分类、证据驱动进度状态、30 场景离线回归、脱敏诊断会话、轻量控制台和 Docker 可复现运行。Week 7 将这些能力收敛为 RobotOps Copilot MVP，增加 Agent SSE 生命周期、四类公开终止状态、实时控制台展示、会话导出和完整端到端交付记录。Week 8 修复否定意图工具范围，完成空知识库交付验证、真实模型抽样、安全复测和候选版本质量收敛。

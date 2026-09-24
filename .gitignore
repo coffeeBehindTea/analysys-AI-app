@@ -139,10 +139,14 @@ uploads/
 # 默认忽略docs中的JSON报告，因为其中可能包含完整正文或评测明细。
 /docs/*.json
 
-# Week 7要求公开的两份JSON已经过脱敏，
-# 分别用于机器可读回归审计和完整端到端样本。
+# 已完成脱敏检查、需要随候选版本公开的机器可读报告。
+# 其他docs根目录JSON仍保持默认忽略，避免误提交包含正文、
+# 图片载荷或临时调试信息的本地结果。
 !/docs/multimodal-offline-regression.json
 !/docs/e2e-run-sample.json
+!/docs/real-model-evaluation.json
+!/docs/candidate-acceptance-normal.json
+!/docs/candidate-acceptance-human-review.json
 
 # 以下Agent轨迹已经过脱敏，是Week 4要求提交的可审计运行样例。
 !/docs/agent-trace-agent-001-failure.json
@@ -210,3 +214,13 @@ uploads/
 !/docs/pytest-results-week3-final.xml
 !/docs/pytest-results-week4-final.xml
 !/docs/pytest-results-week6-final.xml
+!/docs/pytest-results-week8-final.xml
+
+
+# =========================================================
+# 演示视频
+# =========================================================
+
+# 完整演示视频作为GitHub Release Asset发布，不进入普通Git历史。
+# README使用releases/latest/download稳定地址指向同名资源。
+/docs/*.mp4

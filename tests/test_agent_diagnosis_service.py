@@ -797,6 +797,77 @@ async def test_service_passes_minimal_tool_scope_to_runner(
 
 
 @pytest.mark.asyncio
+async def test_service_keeps_excluded_telemetry_out_of_scope_and_missing_info(
+) -> None:
+    """否定的遥测能力不得进入Runner或最终缺失信息。
+
+    被测试模块是AgentDiagnosisService.diagnose()与
+    AgentToolPolicy.decide()的集成边界。请求要求检索知识库，
+    同时明确说“别读取模拟遥测”。FakeRunner返回一份合法的
+    知识证据诊断草稿，不调用真实Planner或任何真实工具。
+
+    预期调用流程是：Service完成安全分类，策略只保留
+    knowledge_evidence，Service把search_knowledge作为唯一工具
+    和唯一待完成能力交给Runner。最终响应不得出现“遥测缺失”，
+    证明被排除能力没有进入后续进度归约和报告构造链路。
+    """
+
+    service, runner = make_service(
+        make_completed_result()
+    )
+
+    response = await service.diagnose(
+        make_request(
+            task_goal=(
+                "检索知识库中的网络恢复规则，"
+                "别读取模拟遥测"
+            ),
+        ),
+        TEST_REQUEST_ID,
+    )
+
+    assert runner.allowed_tool_scopes == [
+        frozenset({
+            "search_knowledge",
+        })
+    ]
+
+    assert len(runner.initial_progresses) == 1
+    initial_progress = (
+        runner.initial_progresses[0]
+    )
+    assert initial_progress is not None
+    assert initial_progress.required_capabilities == (
+        "knowledge_evidence",
+    )
+    assert initial_progress.allowed_next_tool_names == (
+        "search_knowledge",
+    )
+
+    _, task_json = runner.tasks[0].split(
+        "\n",
+        1,
+    )
+    task_payload = json.loads(task_json)
+    assert task_payload["allowed_tools"] == [
+        "search_knowledge",
+    ]
+
+    assert (
+        "get_robot_telemetry"
+        not in task_payload["allowed_tools"]
+    )
+    assert (
+        "尚未取得任务所需的模拟遥测快照"
+        not in response.diagnosis.missing_information
+    )
+    assert (
+        "尚未取得任务所需的模拟遥测快照"
+        not in response.execution.missing_information
+    )
+
+
+@pytest.mark.asyncio
 async def test_service_passes_optional_observer_to_runner(
 ) -> None:
     """SSE模式应发布外层事件并把同一Observer传入Runner。

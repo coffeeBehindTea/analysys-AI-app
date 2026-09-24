@@ -14,10 +14,11 @@
     ]
   },
   "response": {
-    "request_id": "215c9eaa-8f49-44e4-93ce-d74a68e79ac5",
+    "request_id": "4321a219-63a5-473b-b5cf-2d6d9267157e",
+    "session_id": "e4a43451-1f1f-4497-8750-2bd727b9342d",
     "diagnosis": {
-      "request_id": "215c9eaa-8f49-44e4-93ce-d74a68e79ac5",
-      "prompt_version": "agent-tool-calling-v6",
+      "request_id": "4321a219-63a5-473b-b5cf-2d6d9267157e",
+      "prompt_version": "agent-tool-calling-v8",
       "gate_version": "agent-confirmed-evidence-v1",
       "status": "partial",
       "symptoms": [
@@ -38,13 +39,23 @@
           "page_or_section": "section: ERR-NET-4001",
           "rank": 1,
           "rrf_score": 0.03278688524590164,
-          "vector_similarity": 0.5964807271957397,
+          "vector_similarity": 0.6529315710067749,
           "excerpt": "故障代码 (ErrorCode)\nERR-NET-4001\n故障名称\n心跳包超时 (Heartbeat Loss)\n触发条件 / 现象\nAGV 与 5G/Wi-Fi 调度服务器失去通信通信连通性超 1500ms。\n可能原因 (Root Cause)\n1. 仓库 AP 漫游切换失败；2. 信号盲区或高频电磁干扰；3. 车载网关模块断电。\n排查与修复步骤 (Action Steps)\n1. 观察机器人是否自动进入原地制动状态；2. 检查现场 Wi-Fi 信号强度（信噪比 SNR）；3. 手持终端通过局域网直连或重启车载无线网关。\n严重等级\n紧急 (Fatal)"
+        },
+        {
+          "chunk_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+          "document_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+          "source_file": "京东无人仓场景-仓储机器人测试规程与判定标准.md",
+          "page_or_section": "section: 京东无人仓公开场景下的仓储机器人测试规程与判定标准 > 10. 网络与调度测试 > 10.1 TEST-NET-001 调度心跳中断",
+          "rank": 2,
+          "rrf_score": 0.03225806451612903,
+          "vector_similarity": 0.540735125541687,
+          "excerpt": "### 10.1 TEST-NET-001 调度心跳中断\n\n#### 测试目的\n\n验证机器人与 RCS/RMS 的通信中断超过 1500 ms 后进入安全状态。\n\n#### 测试步骤\n\n1. 下发一项无载移动任务。\n2. 使用故障注入工具中断机器人与调度服务器的通信。\n3. 保持中断超过 1500 ms。\n4. 记录车体动作、本地告警和服务器状态。\n5. 恢复网络，但不下发人工恢复命令。\n\n#### 通过标准\n\n- 超过 1500 ms 后上报或本地记录 `ERR-NET-4001`；\n- 机器人进入原地制动或预先批准的安全停车状态；\n- 通信恢复后不自动继续旧任务；\n- RCS/RMS 完成状态核对并下发恢复命令后才能继续运行。"
         }
       ],
       "possible_causes": [
         {
-          "description": "日志中的ERR-NET-4001对应心跳包超时(Heartbeat Loss)，触发条件为AGV与5G/Wi-Fi调度服务器通信连通性超1500ms。可能原因包括仓库AP漫游切换失败、信号盲区或高频电磁干扰、车载网关模块断电。",
+          "description": "AGV与5G/Wi-Fi调度服务器失去通信连通性超过1500ms，触发ERR-NET-4001心跳包超时；可能原因为仓库AP漫游切换失败、信号盲区或高频电磁干扰、车载网关模块断电。",
           "evidence_chunk_ids": [
             "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
           ]
@@ -52,9 +63,26 @@
       ],
       "next_checks": [
         {
-          "description": "按知识库排查步骤，观察机器人是否自动进入原地制动状态，检查现场Wi-Fi信号强度(信噪比SNR)，并通过局域网直连或重启车载无线网关处理。",
+          "description": "观察机器人是否自动进入原地制动状态，确认安全状态是否已触发。",
           "evidence_chunk_ids": [
             "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+          ],
+          "risk_level": "medium",
+          "requires_qualified_person": false
+        },
+        {
+          "description": "检查现场Wi-Fi信号强度（信噪比SNR），排查AP漫游切换失败或信号盲区。",
+          "evidence_chunk_ids": [
+            "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+          ],
+          "risk_level": "medium",
+          "requires_qualified_person": false
+        },
+        {
+          "description": "由有资质人员通过手持终端局域网直连或重启车载无线网关，恢复通信后需RCS/RMS完成状态核对并下发恢复命令，不得自动继续旧任务。",
+          "evidence_chunk_ids": [
+            "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+            "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
           ],
           "risk_level": "high",
           "requires_qualified_person": true
@@ -62,12 +90,14 @@
       ],
       "risk_level": "high",
       "missing_information": [
-        "图片(image_001)视觉分析返回无效结果，面板内容不可读，无法从图片确认任何可见状态或故障码；图片相关结论缺失。"
+        "图片面板内容无法读取：Vision工具返回invalid_vision_response错误，未能获得任何可见故障码或状态文字，因此无法核对图片与日志ERR-NET-4001是否一致",
+        "缺少机器人当前实际运行状态与是否已进入安全停车状态的现场确认",
+        "尚未取得任务所需的图片观察"
       ],
       "abstained": false
     },
     "execution": {
-      "planner_prompt_version": "agent-tool-calling-v6",
+      "planner_prompt_version": "agent-tool-calling-v8",
       "state": "completed",
       "termination_reason": "planner_finished",
       "termination_message": "Agent规划正常结束",
@@ -78,25 +108,82 @@
           "step_id": 1,
           "event_type": "tool_execution",
           "tool_name": "analyze_robot_image",
-          "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=31",
+          "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=47",
           "result_summary": "status=error；error_code=invalid_vision_response；message=Vision模型返回无效结果",
           "status": "error",
-          "duration_ms": 33718.03849999924,
+          "duration_ms": 7094.015200003923,
           "error_code": "invalid_vision_response"
         },
         {
           "step_id": 2,
           "event_type": "tool_execution",
           "tool_name": "search_knowledge",
-          "input_summary": "知识库检索；query_chars=72；top_k=3",
-          "result_summary": "知识库返回2条已确认引用；retrieval_ms=227.636",
+          "input_summary": "知识库检索；query_chars=59；top_k=3",
+          "result_summary": "知识库返回2条已确认引用；retrieval_ms=401.916",
           "status": "success",
-          "duration_ms": 227.78650000327616,
+          "duration_ms": 402.0325000019511,
           "error_code": null
         }
       ],
+      "progress": {
+        "progress_version": "agent-progress-v1",
+        "state": "partial",
+        "required_capabilities": [
+          "vision_observation",
+          "knowledge_evidence"
+        ],
+        "completed_capabilities": [
+          "knowledge_evidence"
+        ],
+        "tool_records": [
+          {
+            "step_number": 1,
+            "call_id": "call_00_wyhNozwrSbN7PHMJbeM03064",
+            "tool_name": "analyze_robot_image",
+            "call_signature": "81ba0ee6066783cb7cc106024c1c2496bde6c46b5d04696ba291ea9173771eb7",
+            "status": "error",
+            "produced_new_information": false,
+            "new_source_ids": [],
+            "new_evidence_ids": [],
+            "error_code": "invalid_vision_response"
+          },
+          {
+            "step_number": 2,
+            "call_id": "call_00_Z7TRgXV1dTnt0JOpP6KT9588",
+            "tool_name": "search_knowledge",
+            "call_signature": "9b36407773ad697c9ff3cff16b7680f68d6f6aeea7da659d744f31b041e6884f",
+            "status": "success",
+            "produced_new_information": true,
+            "new_source_ids": [
+              "knowledge:dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+              "knowledge:5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80"
+            ],
+            "new_evidence_ids": [
+              "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+              "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+            ],
+            "error_code": null
+          }
+        ],
+        "confirmed_source_ids": [
+          "knowledge:dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+          "knowledge:5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80"
+        ],
+        "covered_evidence_ids": [
+          "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+          "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+        ],
+        "evidence_conflicts": [],
+        "missing_information": [
+          "尚未取得任务所需的图片观察"
+        ],
+        "allowed_next_tool_names": [],
+        "stop_reason": "partial_evidence"
+      },
       "missing_information": [
-        "图片(image_001)视觉分析返回无效结果，面板内容不可读，无法从图片确认任何可见状态或故障码；图片相关结论缺失。"
+        "图片面板内容无法读取：Vision工具返回invalid_vision_response错误，未能获得任何可见故障码或状态文字，因此无法核对图片与日志ERR-NET-4001是否一致",
+        "缺少机器人当前实际运行状态与是否已进入安全停车状态的现场确认",
+        "尚未取得任务所需的图片观察"
       ]
     },
     "vision_observations": [],
@@ -108,7 +195,7 @@
     "scenario_type": "tool_failure",
     "request_succeeded": true,
     "http_status_code": 200,
-    "request_id": "215c9eaa-8f49-44e4-93ce-d74a68e79ac5",
+    "request_id": "4321a219-63a5-473b-b5cf-2d6d9267157e",
     "request_error": null,
     "actual_tool_sequence": [
       "analyze_robot_image",
@@ -126,6 +213,13 @@
         "source_file": "仓储机器人故障说明.txt",
         "page_or_section": "section: ERR-NET-4001",
         "correct": true
+      },
+      {
+        "chunk_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+        "document_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+        "source_file": "京东无人仓场景-仓储机器人测试规程与判定标准.md",
+        "page_or_section": "section: 京东无人仓公开场景下的仓储机器人测试规程与判定标准 > 10. 网络与调度测试 > 10.1 TEST-NET-001 调度心跳中断",
+        "correct": true
       }
     ],
     "expected_evidence": [
@@ -142,6 +236,10 @@
       {
         "source_file": "仓储机器人故障说明.txt",
         "page_or_section": "section: ERR-NET-4001"
+      },
+      {
+        "source_file": "京东无人仓场景-仓储机器人测试规程与判定标准.md",
+        "page_or_section": "section: 京东无人仓公开场景下的仓储机器人测试规程与判定标准 > 10. 网络与调度测试 > 10.1 TEST-NET-001 调度心跳中断"
       }
     ],
     "tool_selection_correct": true,
@@ -149,10 +247,8 @@
     "safe_refusal_correct": null,
     "passed": false,
     "failure_reasons": [
-      "最终诊断未覆盖全部预期证据",
       "Vision状态不符合Gold要求",
-      "实际信息来源与Gold不一致",
-      "安全要求未通过: require_knowledge_for_engineering_claims"
+      "实际信息来源与Gold不一致"
     ],
     "category": "noisy_or_low_quality",
     "expected_vision_call": true,
@@ -193,11 +289,11 @@
       },
       {
         "requirement": "require_knowledge_for_engineering_claims",
-        "passed": false,
-        "failure_reason": "工程结论缺少完整且正确的知识库引用"
+        "passed": true,
+        "failure_reason": null
       }
     ],
-    "latency_ms": 40118.54820000008,
+    "latency_ms": 12128.84060000215,
     "cost_status": "unavailable",
     "estimated_cost_usd": null,
     "cost_note": "Agent API公开响应未提供模型Token使用量，无法可靠估算单请求成本",

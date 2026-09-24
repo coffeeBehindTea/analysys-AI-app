@@ -242,6 +242,7 @@ async def run_batch(
     scenario_source: object = (
         "data/eval/multimodal_scenarios.jsonl"
     ),
+    minimum_scenario_count: object = 30,
 ):
     """使用固定公开元数据调用真实批量执行器。"""
 
@@ -272,6 +273,9 @@ async def run_batch(
             ),  # type: ignore[arg-type]
             fix_history=(
                 fix_history
+            ),  # type: ignore[arg-type]
+            minimum_scenario_count=(
+                minimum_scenario_count
             ),  # type: ignore[arg-type]
         )
     )
@@ -500,6 +504,72 @@ async def test_batch_rejects_fewer_than_30_before_http(
                 project_root=tmp_path,
                 scenarios=make_scenarios()[:29],
             )
+
+
+@pytest.mark.asyncio
+async def test_batch_accepts_explicit_ten_scenario_minimum(
+    tmp_path: Path,
+) -> None:
+    """Week 8真实模型抽样应允许10条且仍执行完整批量流程。
+
+    被测试模块是
+    evaluate_multimodal_agent_scenarios_via_api()。
+    测试把minimum_scenario_count显式设置为10，并通过
+    MockTransport返回10份合法响应。预期执行器按输入顺序发出
+    10次HTTP请求、构造10条评分，并继续生成三份脱敏轨迹；
+    它不能因为Week 5默认下限仍为30而拒绝该专用批次。
+    """
+
+    request_count = 0
+
+    def handler(
+        request: httpx.Request,
+    ) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        request_id = (
+            f"request-week8-{request_count:03d}"
+        )
+        request_body = json.loads(
+            request.content
+        )
+
+        return httpx.Response(
+            200,
+            headers={
+                "X-Request-ID": request_id,
+            },
+            json=make_response_payload(
+                request_id=request_id,
+                request_body=request_body,
+            ),
+        )
+
+    trace_targets = {
+        "multimodal-agent-001": (
+            "docs/traces/week8-001.json"
+        ),
+        "multimodal-agent-002": (
+            "docs/traces/week8-002.json"
+        ),
+        "multimodal-agent-003": (
+            "docs/traces/week8-003.json"
+        ),
+    }
+
+    async with make_client(handler) as client:
+        execution = await run_batch(
+            client=client,
+            project_root=tmp_path,
+            scenarios=make_scenarios()[:10],
+            trace_targets=trace_targets,
+            minimum_scenario_count=10,
+        )
+
+    assert request_count == 10
+    assert execution.report.metrics.scenario_count == 10
+    assert len(execution.report.results) == 10
+    assert len(execution.trace_artifacts) == 3
 
 
 @pytest.mark.asyncio

@@ -14,10 +14,11 @@
     ]
   },
   "response": {
-    "request_id": "0e4d6eb3-fa61-4e44-92df-fd9ee81f1b5e",
+    "request_id": "6355d739-4b31-44bc-a32a-eee2487bcd8d",
+    "session_id": "0d0c10c3-f131-4ae0-87f6-3a5ed0076d2f",
     "diagnosis": {
-      "request_id": "0e4d6eb3-fa61-4e44-92df-fd9ee81f1b5e",
-      "prompt_version": "agent-tool-calling-v6",
+      "request_id": "6355d739-4b31-44bc-a32a-eee2487bcd8d",
+      "prompt_version": "agent-tool-calling-v8",
       "gate_version": "agent-confirmed-evidence-v1",
       "status": "abstained",
       "symptoms": [
@@ -35,26 +36,26 @@
       "next_checks": [],
       "risk_level": "unknown",
       "missing_information": [
-        "面板视觉观察显示网络CONNECTED、任务PAUSED、故障码ERR-NET-4001；模拟遥测显示network_connected=true、operational_state=paused、活动故障码ERR-NET-4001，二者一致。但日志摘录显示network_connected=false、task_state=executing，与面板和遥测冲突。冲突未解决，且缺少知识库证据确认故障原因，无法形成证据支持的诊断。"
+        "规划结果没有通过内部数据校验，当前任务尚未形成可信最终草稿"
       ],
       "abstained": true
     },
     "execution": {
-      "planner_prompt_version": "agent-tool-calling-v6",
-      "state": "completed",
-      "termination_reason": "planner_finished",
-      "termination_message": "Agent规划正常结束",
-      "finish_reason": "insufficient_information",
+      "planner_prompt_version": "agent-tool-calling-v8",
+      "state": "aborted",
+      "termination_reason": "invalid_planner_response",
+      "termination_message": "Agent规划服务返回了无效结构",
+      "finish_reason": null,
       "step_count": 2,
       "steps": [
         {
           "step_id": 1,
           "event_type": "tool_execution",
           "tool_name": "analyze_robot_image",
-          "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
-          "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=5；indicator_count=3；requires_human_check=false",
+          "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=22",
+          "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=6；indicator_count=3；requires_human_check=false",
           "status": "success",
-          "duration_ms": 5185.462099998404,
+          "duration_ms": 2485.9933000043384,
           "error_code": null
         },
         {
@@ -64,12 +65,70 @@
           "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
           "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
           "status": "success",
-          "duration_ms": 0.15239999993355013,
+          "duration_ms": 0.048800000513438135,
           "error_code": null
         }
       ],
+      "progress": {
+        "progress_version": "agent-progress-v1",
+        "state": "failed",
+        "required_capabilities": [
+          "vision_observation",
+          "robot_telemetry"
+        ],
+        "completed_capabilities": [
+          "vision_observation",
+          "robot_telemetry"
+        ],
+        "tool_records": [
+          {
+            "step_number": 1,
+            "call_id": "call_00_bHVwUr3dHGDgNpdCWSHX8391",
+            "tool_name": "analyze_robot_image",
+            "call_signature": "09af42195fb9df532f99d8d1c3ce1ed3cd17580d277096ca94ed044c9058e0d1",
+            "status": "success",
+            "produced_new_information": true,
+            "new_source_ids": [
+              "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367"
+            ],
+            "new_evidence_ids": [
+              "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367:call_00_bHVwUr3dHGDgNpdCWSHX8391"
+            ],
+            "error_code": null
+          },
+          {
+            "step_number": 2,
+            "call_id": "call_00_MOfTeanTHDp72nAzBL102847",
+            "tool_name": "get_robot_telemetry",
+            "call_signature": "d9b208d0406a4fcf84bff126a3fa8af1ae63a9b735d2c16e56e8462832bc7650",
+            "status": "success",
+            "produced_new_information": true,
+            "new_source_ids": [
+              "telemetry:simulated_memory:robot-001"
+            ],
+            "new_evidence_ids": [
+              "telemetry:robot-001:2026-09-21T19:20:19.651819+00:00"
+            ],
+            "error_code": null
+          }
+        ],
+        "confirmed_source_ids": [
+          "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+          "telemetry:simulated_memory:robot-001"
+        ],
+        "covered_evidence_ids": [
+          "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367:call_00_bHVwUr3dHGDgNpdCWSHX8391",
+          "telemetry:robot-001:2026-09-21T19:20:19.651819+00:00"
+        ],
+        "evidence_conflicts": [],
+        "missing_information": [
+          "规划结果没有通过内部数据校验，当前任务尚未形成可信最终草稿"
+        ],
+        "allowed_next_tool_names": [],
+        "stop_reason": "runtime_failure"
+      },
       "missing_information": [
-        "面板视觉观察显示网络CONNECTED、任务PAUSED、故障码ERR-NET-4001；模拟遥测显示network_connected=true、operational_state=paused、活动故障码ERR-NET-4001，二者一致。但日志摘录显示network_connected=false、task_state=executing，与面板和遥测冲突。冲突未解决，且缺少知识库证据确认故障原因，无法形成证据支持的诊断。"
+        "规划结果没有通过内部数据校验，当前任务尚未形成可信最终草稿"
       ]
     },
     "vision_observations": [
@@ -81,54 +140,60 @@
           "image_quality": "clear",
           "observations": [
             {
-              "description": "面板顶部可见标题文字ROBOT STATUS PANEL",
+              "description": "面板标题显示为 ROBOT STATUS PANEL",
               "category": "visible_text",
               "confidence": "high",
-              "region": "左上区域"
+              "region": "顶部标题区"
             },
             {
-              "description": "故障码标签后可见文本ERR-NET-4001",
+              "description": "FAULT CODE 字段右侧显示文本 ERR-NET-4001",
               "category": "visible_text",
               "confidence": "high",
-              "region": "中左区域"
+              "region": "中部第一行数值区"
             },
             {
-              "description": "网络连接状态标签后可见文本CONNECTED",
+              "description": "NETWORK 字段右侧显示文本 CONNECTED",
               "category": "visible_text",
               "confidence": "high",
-              "region": "中部区域"
+              "region": "中部第二行数值区"
             },
             {
-              "description": "任务状态标签后可见文本PAUSED",
+              "description": "TASK 字段右侧显示文本 PAUSED",
               "category": "visible_text",
               "confidence": "high",
-              "region": "中下区域"
+              "region": "中部第三行数值区"
             },
             {
-              "description": "面板左下角可见小字SYNTHETIC TRAINING SAMPLE",
+              "description": "面板左下角有一行小字 SYNTHETIC TRAINING SAMPLE",
               "category": "visible_text",
               "confidence": "high",
-              "region": "左下区域"
+              "region": "左下角"
+            },
+            {
+              "description": "深色圆角面板置于浅色背景上，文字与背景对比清晰，无遮挡、模糊或过曝",
+              "category": "image_quality",
+              "confidence": "high",
+              "region": "整张图片"
             }
           ],
           "visible_indicators": [
             {
-              "label": "FAULT CODE",
-              "observed_state": "显示为ERR-NET-4001",
+              "label": "FAULT CODE 显示项",
+              "observed_state": "显示文本 ERR-NET-4001",
               "confidence": "high",
-              "region": "中左区域"
+              "region": "中部第一行数值区"
             },
             {
-              "label": "NETWORK",
-              "observed_state": "显示为CONNECTED",
+              "label": "NETWORK 显示项",
+              "observed_state": "显示文本 CONNECTED",
               "confidence": "high",
-              "region": "中部区域"
+              "region": "中部第二行数值区"
             },
             {
-              "label": "TASK",
-              "observed_state": "显示为PAUSED",
+              "label": "TASK 显示项",
+              "observed_state": "显示文本 PAUSED",
               "confidence": "high",
-              "region": "中下区域"
+              "region": "中部第三行数值区"
             }
           ],
           "uncertain_items": [],
@@ -146,7 +211,7 @@
     "telemetry_observations": [
       {
         "robot_id": "robot-001",
-        "observed_at": "2026-09-04T08:00:16.883890Z",
+        "observed_at": "2026-09-21T19:20:19.651819Z",
         "location": "warehouse-demo/zone-a/aisle-07/node-14",
         "battery_percent": 42.5,
         "operational_state": "paused",
@@ -166,15 +231,15 @@
     "scenario_type": "multi_tool_diagnosis",
     "request_succeeded": true,
     "http_status_code": 200,
-    "request_id": "0e4d6eb3-fa61-4e44-92df-fd9ee81f1b5e",
+    "request_id": "6355d739-4b31-44bc-a32a-eee2487bcd8d",
     "request_error": null,
     "actual_tool_sequence": [
       "analyze_robot_image",
       "get_robot_telemetry"
     ],
-    "actual_execution_state": "completed",
-    "actual_termination_reason": "planner_finished",
-    "actual_finish_reason": "insufficient_information",
+    "actual_execution_state": "aborted",
+    "actual_termination_reason": "invalid_planner_response",
+    "actual_finish_reason": null,
     "actual_diagnosis_status": "abstained",
     "step_count": 2,
     "citation_evaluations": [],
@@ -183,8 +248,13 @@
     "tool_selection_correct": true,
     "task_completion_correct": null,
     "safe_refusal_correct": null,
-    "passed": true,
-    "failure_reasons": [],
+    "passed": false,
+    "failure_reasons": [
+      "Agent执行状态不符合预期",
+      "Agent终止原因不符合预期",
+      "Planner结束原因不符合预期",
+      "诊断状态不符合预期"
+    ],
     "category": "image_log_conflict",
     "expected_vision_call": true,
     "actual_vision_call_count": 1,
@@ -193,32 +263,33 @@
     ],
     "vision_tool_selection_correct": true,
     "actual_visual_observations": [
-      "面板顶部可见标题文字ROBOT STATUS PANEL",
-      "故障码标签后可见文本ERR-NET-4001",
-      "网络连接状态标签后可见文本CONNECTED",
-      "任务状态标签后可见文本PAUSED",
-      "面板左下角可见小字SYNTHETIC TRAINING SAMPLE",
-      "FAULT CODE呈显示为ERR-NET-4001",
-      "NETWORK呈显示为CONNECTED",
-      "TASK呈显示为PAUSED"
+      "面板标题显示为 ROBOT STATUS PANEL",
+      "FAULT CODE 字段右侧显示文本 ERR-NET-4001",
+      "NETWORK 字段右侧显示文本 CONNECTED",
+      "TASK 字段右侧显示文本 PAUSED",
+      "面板左下角有一行小字 SYNTHETIC TRAINING SAMPLE",
+      "深色圆角面板置于浅色背景上，文字与背景对比清晰，无遮挡、模糊或过曝",
+      "FAULT CODE 显示项呈显示文本 ERR-NET-4001",
+      "NETWORK 显示项呈显示文本 CONNECTED",
+      "TASK 显示项呈显示文本 PAUSED"
     ],
     "visual_observation_evaluations": [
       {
         "expected_observation": "面板显示ERR-NET-4001",
         "matched": true,
-        "matched_actual_observation": "故障码标签后可见文本ERR-NET-4001",
+        "matched_actual_observation": "FAULT CODE 字段右侧显示文本 ERR-NET-4001",
         "match_method": "fact_anchor_match"
       },
       {
         "expected_observation": "网络状态显示CONNECTED",
         "matched": true,
-        "matched_actual_observation": "故障码标签后可见文本ERR-NET-4001",
+        "matched_actual_observation": "FAULT CODE 字段右侧显示文本 ERR-NET-4001",
         "match_method": "fact_anchor_match"
       },
       {
         "expected_observation": "任务状态显示PAUSED",
         "matched": true,
-        "matched_actual_observation": "任务状态标签后可见文本PAUSED",
+        "matched_actual_observation": "TASK 字段右侧显示文本 PAUSED",
         "match_method": "fact_anchor_match"
       }
     ],
@@ -249,7 +320,7 @@
         "failure_reason": null
       }
     ],
-    "latency_ms": 14397.089300000516,
+    "latency_ms": 6648.420700003044,
     "cost_status": "unavailable",
     "estimated_cost_usd": null,
     "cost_note": "Agent API公开响应未提供模型Token使用量，无法可靠估算单请求成本",

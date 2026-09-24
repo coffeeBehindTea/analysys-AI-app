@@ -80,7 +80,7 @@
           "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
           "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=2；indicator_count=0；requires_human_check=false",
           "status": "success",
-          "duration_ms": 0.10299999985363684,
+          "duration_ms": 0.10250000195810571,
           "error_code": null
         },
         {
@@ -90,7 +90,7 @@
           "input_summary": "知识库检索；query_chars=29；top_k=3",
           "result_summary": "知识库返回1条已确认引用；retrieval_ms=5.000",
           "status": "success",
-          "duration_ms": 0.048799999603943434,
+          "duration_ms": 0.04939999780617654,
           "error_code": null
         }
       ],
@@ -293,7 +293,7 @@
         "failure_reason": null
       }
     ],
-    "latency_ms": 8.71019999976852,
+    "latency_ms": 6.431699999666307,
     "cost_status": "unavailable",
     "estimated_cost_usd": null,
     "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",

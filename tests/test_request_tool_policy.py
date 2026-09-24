@@ -31,6 +31,126 @@ from app.schemas.vision import (
 TEST_IMAGE_BASE64 = "QUFB"
 
 
+# 任务1要求覆盖不少于15条否定表达和组合表达。
+#
+# 每个参数依次表示：
+#
+# 1. 用户任务目标；
+# 2. 请求是否附带图片；
+# 3. 排除规则生效后仍然需要的能力；
+# 4. 最终允许进入Planner的最小工具集合。
+#
+# 这些案例覆盖五类能力和“不、别、不要、无需、不需要、禁止”
+# 六类常见中文否定形式。案例只描述通用能力，不依赖评测场景编号。
+NEGATED_CAPABILITY_CASES = (
+    pytest.param(
+        "检索知识库规则，别读取图片中的故障码",
+        True,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="vision-bie-read-image",
+    ),
+    pytest.param(
+        "检索知识库规则，不要分析面板指示灯",
+        True,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="vision-buyao-analyze-panel",
+    ),
+    pytest.param(
+        "检索知识库规则，无需使用照片",
+        True,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="vision-wuxu-use-photo",
+    ),
+    pytest.param(
+        "查询当前系统时间，不检索知识库",
+        False,
+        ("current_time",),
+        ("get_current_time",),
+        id="knowledge-bu-search",
+    ),
+    pytest.param(
+        "查询当前系统时间，不需要引用手册证据",
+        False,
+        ("current_time",),
+        ("get_current_time",),
+        id="knowledge-buxuyao-manual",
+    ),
+    pytest.param(
+        "查询当前系统时间，禁止查询文档规则",
+        False,
+        ("current_time",),
+        ("get_current_time",),
+        id="knowledge-jinzhi-document",
+    ),
+    pytest.param(
+        "检索网络恢复规则，别读取遥测",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="telemetry-bie-read",
+    ),
+    pytest.param(
+        "检索网络恢复规则，不要查询当前模拟状态",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="telemetry-buyao-current-state",
+    ),
+    pytest.param(
+        "检索网络恢复规则，无需获取当前电量",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="telemetry-wuxu-battery",
+    ),
+    pytest.param(
+        "检索知识库规则，不生成测试草案",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="draft-bu-generate",
+    ),
+    pytest.param(
+        "检索知识库规则，不需要准备验证方案",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="draft-buxuyao-prepare",
+    ),
+    pytest.param(
+        "检索知识库规则，禁止创建测试用例",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="draft-jinzhi-create",
+    ),
+    pytest.param(
+        "检索知识库规则，别查询当前时间",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="time-bie-query",
+    ),
+    pytest.param(
+        "检索知识库规则，无需读取系统时间",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="time-wuxu-read",
+    ),
+    pytest.param(
+        "检索知识库规则，不需要使用日期",
+        False,
+        ("knowledge_evidence",),
+        ("search_knowledge",),
+        id="time-buxuyao-date",
+    ),
+)
+
+
 def make_image(
     analysis_goal: str,
     /,
@@ -259,6 +379,169 @@ def test_decide_excludes_vision_when_request_says_not_to_read_image(
     )
     assert "image_input_available" not in (
         decision.reason_codes
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "task_goal",
+        "include_image",
+        "expected_capabilities",
+        "expected_tools",
+    ),
+    NEGATED_CAPABILITY_CASES,
+)
+def test_decide_honors_common_negated_capability_expressions(
+    task_goal: str,
+    include_image: bool,
+    expected_capabilities: tuple[str, ...],
+    expected_tools: tuple[str, ...],
+) -> None:
+    """常见否定表达必须从能力和工具范围中同时移除目标。
+
+    被测试模块是AgentToolPolicy.decide()中的否定意图识别。
+    测试先提供同时含有正向能力词和否定词的task_goal，再根据
+    参数选择是否附带图片。策略应先识别否定能力，再执行正向
+    能力匹配和默认知识能力判断。
+
+    预期返回的required_capabilities只保留用户仍然要求的能力，
+    allowed_tool_names只包含对应的最小工具。被排除能力不能因为
+    同一句仍出现“读取、检索、查询、生成”等词而重新开放。
+    """
+
+    images = (
+        [
+            make_image(
+                "读取面板上的故障码和指示灯状态"
+            ),
+        ]
+        if include_image
+        else None
+    )
+
+    decision = AgentToolPolicy().decide(
+        make_request(
+            task_goal=task_goal,
+            images=images,
+        )
+    )
+
+    assert decision.disposition == (
+        "continue_to_planner"
+    )
+    assert decision.required_capabilities == (
+        expected_capabilities
+    )
+    assert decision.allowed_tool_names == (
+        expected_tools
+    )
+
+
+def test_decide_combined_exclusions_leave_only_knowledge_tool(
+) -> None:
+    """组合否定必须让知识任务只保留search_knowledge。
+
+    请求附带图片并同时出现遥测、测试草案和时间等正向名词，
+    但task_goal明确排除这四类能力。策略应让排除规则优先，
+    只保留没有被排除的知识证据能力。
+    """
+
+    decision = AgentToolPolicy().decide(
+        make_request(
+            task_goal=(
+                "检索知识库中的网络恢复规则；"
+                "别读取图片，不要读取模拟遥测，"
+                "无需生成测试草案，禁止查询当前时间"
+            ),
+            images=[
+                make_image(
+                    "读取面板上的故障码"
+                ),
+            ],
+        )
+    )
+
+    assert decision.required_capabilities == (
+        "knowledge_evidence",
+    )
+    assert decision.allowed_tool_names == (
+        "search_knowledge",
+    )
+    assert decision.reason_codes == (
+        "knowledge_evidence_required",
+    )
+
+
+def test_decide_does_not_treat_recognition_word_as_bie_negation(
+) -> None:
+    """“识别图片”中的“别”不是否定词。
+
+    被测试模块是统一否定前缀规则。输入复现离线场景015的
+    通用表达，同时要求识别图片和检索证据。策略应把“识别”
+    作为完整动作词处理，不能从词中间截出“别图片”并关闭
+    Vision；句末“不推测不可见障碍物”也不能扩大否定范围。
+    """
+
+    decision = AgentToolPolicy().decide(
+        make_request(
+            task_goal=(
+                "尝试识别图片并检索安全排查证据；"
+                "不推测不可见障碍物"
+            ),
+            images=[
+                make_image(
+                    "判断图片内容是否清晰可见"
+                ),
+            ],
+        )
+    )
+
+    assert decision.required_capabilities == (
+        "vision_observation",
+        "knowledge_evidence",
+    )
+    assert decision.allowed_tool_names == (
+        "analyze_robot_image",
+        "search_knowledge",
+    )
+
+
+def test_decide_abstains_when_every_capability_is_excluded(
+) -> None:
+    """全部能力被排除时不得默认重新开放知识库。
+
+    被测试模块是AgentToolPolicy.decide()的空能力处理分支。
+    输入逐项排除五种只读能力。预期策略在Planner之前以
+    abstained结束，工具集合保持为空，并只返回通用说明，
+    不把任何已被用户排除的能力写成缺失信息。
+    """
+
+    decision = AgentToolPolicy().decide(
+        make_request(
+            task_goal=(
+                "别读取图片，不要检索知识库，"
+                "无需读取模拟遥测，不需要生成测试草案，"
+                "禁止查询当前时间"
+            ),
+            images=[
+                make_image(
+                    "读取面板上的故障码"
+                ),
+            ],
+        )
+    )
+
+    assert decision.disposition == "abstained"
+    assert decision.required_capabilities == ()
+    assert decision.allowed_tool_names == ()
+    assert decision.reason_codes == (
+        "no_safe_tool_required",
+    )
+    assert decision.public_message == (
+        "当前任务没有保留可执行的只读诊断能力"
+    )
+    assert decision.missing_information == (
+        "请明确至少一项未被排除的只读诊断目标",
     )
 
 

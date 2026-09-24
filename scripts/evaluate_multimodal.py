@@ -3,7 +3,7 @@
 本模块负责：
 
 1. 解析命令行参数；
-2. 读取并校验不少于 30 条多模态 Gold 场景；
+2. 读取并校验多模态 Gold 场景；
 3. 根据 Settings 创建图片输入适配器；
 4. 通过真实 HTTP 接口顺序执行全部场景；
 5. 生成经过数据契约交叉校验的正式报告；
@@ -78,6 +78,7 @@ from app.config import (
 #   评测问题、修正内容和验证依据。
 from app.schemas.multimodal_agent_evaluation import (
     MultimodalAgentBatchExecution,
+    MultimodalAgentEvaluationScenario,
     MultimodalAgentEvaluationReport,
     MultimodalAgentScenarioEvaluation,
     MultimodalEvaluationFixRecord,
@@ -94,6 +95,7 @@ from app.services.embedding_client import (
 # 加载器负责读取 JSONL；
 # 批量执行器负责图片预检、真实 HTTP 请求、评分和汇总。
 from app.services.evaluation import (
+    MIN_MULTIMODAL_AGENT_SCENARIO_COUNT,
     evaluate_multimodal_agent_scenarios_via_api,
     load_multimodal_agent_evaluation_scenarios,
 )
@@ -166,6 +168,39 @@ DEFAULT_TIMEOUT_SECONDS = 120.0
 DEFAULT_LLM_JUDGE_TIMEOUT_SECONDS = 30.0
 
 
+# Week 8真实模型抽样使用的稳定版本和场景集合。
+#
+# 选择依据不是历史通过或失败结果，而是任务要求覆盖的风险面：
+#
+# 001、002、007：正常图片与知识证据联合诊断；
+# 009、013：模糊或低质量图片；
+# 017、019：缺图、关键字段不足或无充分证据；
+# 023：图片、日志与模拟遥测冲突；
+# 029、030：高风险请求与人工审核边界。
+#
+# 其中9条场景携带图片，满足“至少5条包含图片”；
+# 001、023、030同时是既有完整脱敏轨迹目标。
+WEEK8_REAL_MODEL_SAMPLE_VERSION = (
+    "week8-real-model-sample-v1"
+)
+
+WEEK8_REAL_MODEL_SCENARIO_IDS: tuple[
+    str,
+    ...,
+] = (
+    "multimodal-agent-001",
+    "multimodal-agent-002",
+    "multimodal-agent-007",
+    "multimodal-agent-009",
+    "multimodal-agent-013",
+    "multimodal-agent-017",
+    "multimodal-agent-019",
+    "multimodal-agent-023",
+    "multimodal-agent-029",
+    "multimodal-agent-030",
+)
+
+
 # 这三条轨迹覆盖三种不同性质的场景：
 #
 # 001：正常图片 + 知识库联合诊断；
@@ -220,6 +255,116 @@ def resolve_project_path(
         PROJECT_ROOT
         / path
     ).resolve()
+
+
+def select_scenarios(
+    *,
+    scenarios: Sequence[
+        MultimodalAgentEvaluationScenario
+    ],
+    scenario_ids: Sequence[str] | None,
+) -> tuple[
+    MultimodalAgentEvaluationScenario,
+    ...,
+]:
+    """按显式编号选择一组已经通过Schema校验的场景。
+
+    scenario_ids为None时保持历史行为，返回全部场景。
+    显式选择时按照编号参数的顺序返回，而不是依赖JSONL行序。
+    空编号、重复编号和未知编号都会在发送第一条真实HTTP请求
+    之前失败，避免运行一半后才发现抽样集合不可复现。
+    """
+
+    if (
+        isinstance(
+            scenarios,
+            (str, bytes, bytearray),
+        )
+        or not isinstance(scenarios, Sequence)
+    ):
+        raise TypeError(
+            "scenarios必须是多模态场景序列"
+        )
+
+    scenario_items = tuple(scenarios)
+
+    if not scenario_items:
+        raise ValueError(
+            "scenarios不能为空"
+        )
+
+    if scenario_ids is None:
+        return scenario_items
+
+    if (
+        isinstance(
+            scenario_ids,
+            (str, bytes, bytearray),
+        )
+        or not isinstance(
+            scenario_ids,
+            Sequence,
+        )
+    ):
+        raise TypeError(
+            "scenario_ids必须是字符串序列或None"
+        )
+
+    cleaned_ids: list[str] = []
+
+    for index, scenario_id in enumerate(
+        scenario_ids
+    ):
+        if not isinstance(scenario_id, str):
+            raise TypeError(
+                f"scenario_ids第{index}项必须是字符串"
+            )
+
+        cleaned_id = scenario_id.strip()
+
+        if not cleaned_id:
+            raise ValueError(
+                f"scenario_ids第{index}项不能为空"
+            )
+
+        cleaned_ids.append(cleaned_id)
+
+    if not cleaned_ids:
+        raise ValueError(
+            "scenario_ids不能为空"
+        )
+
+    if len(cleaned_ids) != len(set(cleaned_ids)):
+        raise ValueError(
+            "scenario_ids不能重复"
+        )
+
+    scenarios_by_id = {
+        scenario.scenario_id: scenario
+        for scenario in scenario_items
+    }
+
+    if len(scenarios_by_id) != len(scenario_items):
+        raise ValueError(
+            "scenarios包含重复场景编号"
+        )
+
+    unknown_ids = tuple(
+        scenario_id
+        for scenario_id in cleaned_ids
+        if scenario_id not in scenarios_by_id
+    )
+
+    if unknown_ids:
+        raise ValueError(
+            "scenario_ids包含未知场景："
+            + "、".join(unknown_ids)
+        )
+
+    return tuple(
+        scenarios_by_id[scenario_id]
+        for scenario_id in cleaned_ids
+    )
 
 
 def build_trace_targets() -> dict[str, str]:
@@ -744,6 +889,19 @@ def render_markdown_report(
             + " |"
         )
 
+    if metrics.llm_judge_evaluated_count > 0:
+        judge_boundary_text = (
+            "- LLM-as-judge 本批次辅助复核了 "
+            f"{metrics.llm_judge_evaluated_count} 个存在确定性"
+            "匹配缺口的场景；其结果只用于人工分析，不能改变"
+            "确定性 passed 结果。"
+        )
+    else:
+        judge_boundary_text = (
+            "- LLM-as-judge 当前未启用；即使以后启用，"
+            "也只能作为辅助观察，不能改变确定性 passed 结果。"
+        )
+
     lines.extend(
         [
             "",
@@ -930,10 +1088,7 @@ def render_markdown_report(
                 "- 安全拒答率只以明确标记为安全拒答场景的"
                 "案例为分母。"
             ),
-            (
-                "- LLM-as-judge 当前未启用；即使以后启用，"
-                "也只能作为辅助观察，不能改变确定性 passed 结果。"
-            ),
+            judge_boundary_text,
             (
                 "- 成本只有在公开响应提供可靠 usage 和价格依据时"
                 "才进行估算；无法估算不会被错误记为零成本。"
@@ -1211,6 +1366,9 @@ async def run_real_evaluation(
     llm_judge_timeout_seconds: float = (
         DEFAULT_LLM_JUDGE_TIMEOUT_SECONDS
     ),
+    minimum_scenario_count: int = (
+        MIN_MULTIMODAL_AGENT_SCENARIO_COUNT
+    ),
 ) -> MultimodalAgentBatchExecution:
     """装配依赖并通过真实 Agent API 执行整批评测。
 
@@ -1378,6 +1536,9 @@ async def run_real_evaluation(
                     visual_equivalence_judge=(
                         visual_equivalence_judge
                     ),
+                    minimum_scenario_count=(
+                        minimum_scenario_count
+                    ),
                 )
             )
     finally:
@@ -1394,7 +1555,7 @@ def parse_args(
 
     parser = argparse.ArgumentParser(
         description=(
-            "通过真实Agent HTTP API运行30条"
+            "通过真实Agent HTTP API运行"
             "多模态可靠性场景并生成正式报告"
         )
     )
@@ -1431,6 +1592,14 @@ def parse_args(
         type=_positive_float,
         default=DEFAULT_TIMEOUT_SECONDS,
         help="每条Agent HTTP请求的超时秒数",
+    )
+
+    parser.add_argument(
+        "--week8-sample",
+        action="store_true",
+        help=(
+            "只运行固定的10条Week 8真实模型抽样场景"
+        ),
     )
 
     parser.add_argument(
@@ -1575,11 +1744,32 @@ def main() -> None:
     )
 
     # 加载器逐行进行 JSON、Schema 和重复编号检查。
-    scenarios = tuple(
+    loaded_scenarios = tuple(
         load_multimodal_agent_evaluation_scenarios(
             scenarios_path
         )
     )
+
+    scenarios = select_scenarios(
+        scenarios=loaded_scenarios,
+        scenario_ids=(
+            WEEK8_REAL_MODEL_SCENARIO_IDS
+            if args.week8_sample
+            else None
+        ),
+    )
+
+    scenario_source = _scenario_source_text(
+        scenarios_path
+    )
+
+    if args.week8_sample:
+        # 报告继续记录原始JSONL来源，同时显式标记固定抽样版本。
+        # 逐场景results会进一步保存实际执行的10个编号。
+        scenario_source = (
+            f"{scenario_source}#"
+            f"{WEEK8_REAL_MODEL_SAMPLE_VERSION}"
+        )
 
     settings = get_settings()
 
@@ -1593,16 +1783,17 @@ def main() -> None:
             timeout_seconds=(
                 args.timeout_seconds
             ),
-            scenario_source=(
-                _scenario_source_text(
-                    scenarios_path
-                )
-            ),
+            scenario_source=scenario_source,
             enable_llm_judge=(
                 args.enable_llm_judge
             ),
             llm_judge_timeout_seconds=(
                 args.llm_judge_timeout_seconds
+            ),
+            minimum_scenario_count=(
+                len(WEEK8_REAL_MODEL_SCENARIO_IDS)
+                if args.week8_sample
+                else MIN_MULTIMODAL_AGENT_SCENARIO_COUNT
             ),
         )
     )

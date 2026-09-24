@@ -994,6 +994,9 @@ async def evaluate_multimodal_agent_scenarios_via_api(
     visual_equivalence_judge: (
         VisualEquivalenceJudge | None
     ) = None,
+    minimum_scenario_count: int = (
+        MIN_MULTIMODAL_AGENT_SCENARIO_COUNT
+    ),
 ) -> MultimodalAgentBatchExecution:
     """顺序执行完整多模态场景集并构造待写盘产物。
 
@@ -1027,12 +1030,22 @@ async def evaluate_multimodal_agent_scenarios_via_api(
     scenario_items = tuple(scenarios)
 
     if (
-        len(scenario_items)
-        < MIN_MULTIMODAL_AGENT_SCENARIO_COUNT
+        isinstance(minimum_scenario_count, bool)
+        or not isinstance(minimum_scenario_count, int)
     ):
+        raise TypeError(
+            "minimum_scenario_count必须是整数"
+        )
+
+    if minimum_scenario_count <= 0:
+        raise ValueError(
+            "minimum_scenario_count必须大于0"
+        )
+
+    if len(scenario_items) < minimum_scenario_count:
         raise ValueError(
             "多模态Agent批量评测至少需要"
-            f"{MIN_MULTIMODAL_AGENT_SCENARIO_COUNT}"
+            f"{minimum_scenario_count}"
             "条场景"
         )
 
@@ -1066,7 +1079,7 @@ async def evaluate_multimodal_agent_scenarios_via_api(
         )
 
     # 报告元数据必须在第一条网络请求前完成类型、空白和
-    # 两端空格清理，避免跑完30条后才发现报告无法构造。
+    # 两端空格清理，避免跑完整批场景后才发现报告无法构造。
     metadata_values: dict[str, object] = {
         "api_url": api_url,
         "scenario_source": scenario_source,

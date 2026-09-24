@@ -56,7 +56,7 @@
           "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
           "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
           "status": "success",
-          "duration_ms": 0.18929999987449264,
+          "duration_ms": 0.10740000288933516,
           "error_code": null
         },
         {
@@ -66,7 +66,7 @@
           "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
           "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
           "status": "success",
-          "duration_ms": 0.08400000024266774,
+          "duration_ms": 0.03890000516548753,
           "error_code": null
         }
       ],
@@ -274,7 +274,7 @@
         "failure_reason": null
       }
     ],
-    "latency_ms": 7.90210000013758,
+    "latency_ms": 6.8542000008164905,
     "cost_status": "unavailable",
     "estimated_cost_usd": null,
     "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",

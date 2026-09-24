@@ -215,16 +215,67 @@ _CAPABILITY_PATTERNS: dict[
 }
 
 
+# 中文否定词按长度从长到短排列。
+#
+# 这样“不需要”会作为一个完整否定前缀参与匹配，
+# 不会先被更短的“不”截断。
+_NEGATION_PREFIX_PATTERN = (
+    r"(?:不需要|不必|不用|不应|不要|无需|禁止|不得|"
+    r"(?<![识区级类性个辨分特])别|不)"
+)
+
+
+# 否定词与动作之间允许出现少量、含义稳定的修饰词。
+#
+# 不使用任意长度的“.*”，避免把前一句的“不”错误关联到
+# 后一句正常要求的工具。例如“机器人不自动继续，查询时间”
+# 不应被解释成“不要查询时间”。
+_NEGATION_MODIFIER_PATTERN = (
+    r"(?:再|继续|直接|主动|任何)?"
+)
+
+
+# 动作与能力对象之间允许有限长度的非标点文字。
+#
+# 这用于覆盖“读取机器人当前模拟状态”等自然表达，同时禁止
+# 匹配跨越逗号、句号或分号，防止否定范围扩散到下一项任务。
+_NEGATION_OBJECT_GAP_PATTERN = (
+    r"[^，。；,;！？!?\n]{0,8}"
+)
+
+
+def _compile_capability_exclusion_pattern(
+    *,
+    actions: str,
+    objects: str,
+) -> re.Pattern[str]:
+    """为一种能力构造统一的中文否定意图正则。"""
+
+    return re.compile(
+        (
+            _NEGATION_PREFIX_PATTERN
+            + r"\s*"
+            + _NEGATION_MODIFIER_PATTERN
+            + r"\s*"
+            + r"(?:"
+            + r"(?:"
+            + actions
+            + r")"
+            + _NEGATION_OBJECT_GAP_PATTERN
+            + r")?"
+            + r"(?:"
+            + objects
+            + r")"
+        ),
+        re.IGNORECASE,
+    )
+
+
 # 明确排除某种能力的表达。
 #
-# 必须先检查排除规则，再检查正向意图。
-#
-# 例如：
-#
-# “不读取遥测”
-#
-# 同时含有“读取”和“遥测”，
-# 如果只做普通关键词匹配会错误开放遥测工具。
+# 五类能力共用上面的否定语法，只分别声明动作和能力对象。
+# 必须先检查排除规则，再检查正向意图。例如“不读取遥测”
+# 同时含有“读取”和“遥测”，只做正向关键词匹配会错误开放工具。
 _CAPABILITY_EXCLUSION_PATTERNS: dict[
     AgentRequiredCapability,
     tuple[
@@ -233,69 +284,58 @@ _CAPABILITY_EXCLUSION_PATTERNS: dict[
     ],
 ] = {
     "vision_observation": (
-        re.compile(
-            (
-                r"(?:不|无需|不要|禁止)"
-                r".{0,8}"
-                r"(?:读取|观察|查看|分析|使用)"
-                r".{0,8}"
-                r"(?:图片|图像|照片|面板|指示灯)"
-            )
+        _compile_capability_exclusion_pattern(
+            actions=(
+                r"读取|观察|查看|识别|分析|使用|调用"
+            ),
+            objects=(
+                r"图片|图像|照片|面板|指示灯|视觉|vision"
+            ),
         ),
     ),
     "knowledge_evidence": (
-        re.compile(
-            (
-                r"(?:不|无需|不要|禁止)"
-                r".{0,8}"
-                r"(?:检索|查询|使用|引用)"
-                r".{0,8}"
-                r"(?:知识库|文档|手册|证据)"
-            )
-        ),
-        re.compile(
-            (
-                r"(?:不|不得)"
-                r".{0,8}"
-                r"(?:推断|分析)"
-                r".{0,8}"
-                r"(?:工程原因|故障原因)"
-            )
+        _compile_capability_exclusion_pattern(
+            actions=(
+                r"检索|查询|查找|使用|引用|依据|推断|分析|调用"
+            ),
+            objects=(
+                r"知识库|文档|手册|标准|规范|证据|规则|"
+                r"工程原因|故障原因"
+            ),
         ),
     ),
     "robot_telemetry": (
-        re.compile(
-            (
-                r"(?:不|无需|不要|禁止)"
-                r".{0,8}"
-                r"(?:读取|查询|获取|使用)"
-                r".{0,8}"
-                r"(?:模拟遥测|遥测|实时状态|"
-                r"当前模拟状态|当前运行状态|当前设备状态)"
-            )
+        _compile_capability_exclusion_pattern(
+            actions=(
+                r"读取|查询|获取|核对|确认|使用|调用"
+            ),
+            objects=(
+                r"模拟遥测|实时遥测|遥测|实时状态|实时位置|"
+                r"当前位置|当前电量|当前速度|当前任务|当前订单|"
+                r"当前模拟状态|当前运行状态|当前设备状态|"
+                r"当前机器人状态|机器人状态|网络连接状态"
+            ),
         ),
     ),
     "test_case_draft": (
-        re.compile(
-            (
-                r"(?:不|无需|不要|禁止)"
-                r".{0,8}"
-                r"(?:生成|准备|创建|起草)"
-                r".{0,8}"
-                r"(?:测试草案|验证草案|检查草案|"
-                r"测试方案|测试用例)"
-            )
+        _compile_capability_exclusion_pattern(
+            actions=(
+                r"生成|准备|创建|起草|使用|调用"
+            ),
+            objects=(
+                r"测试草案|验证草案|检查草案|测试方案|"
+                r"验证方案|检查方案|测试用例"
+            ),
         ),
     ),
     "current_time": (
-        re.compile(
-            (
-                r"(?:不|无需|不要|禁止)"
-                r".{0,8}"
-                r"(?:读取|查询|使用)"
-                r".{0,8}"
-                r"(?:当前时间|系统时间|日期)"
-            )
+        _compile_capability_exclusion_pattern(
+            actions=(
+                r"读取|查询|获取|使用|调用"
+            ),
+            objects=(
+                r"当前时间|系统时间|时间|当前日期|系统日期|日期"
+            ),
         ),
     ),
 }
@@ -503,11 +543,9 @@ def _capability_is_required(
     """判断任务目标是否明确要求一项能力。"""
 
     # 明确排除优先于正向关键词。
-    if _matches_any(
-        task_goal,
-        _CAPABILITY_EXCLUSION_PATTERNS[
-            capability
-        ],
+    if _capability_is_excluded(
+        capability=capability,
+        task_goal=task_goal,
     ):
         return False
 
@@ -516,6 +554,37 @@ def _capability_is_required(
         _CAPABILITY_PATTERNS[
             capability
         ],
+    )
+
+
+def _capability_is_excluded(
+    *,
+    capability: AgentRequiredCapability,
+    task_goal: str,
+) -> bool:
+    """判断任务目标是否明确排除一项只读能力。"""
+
+    return _matches_any(
+        task_goal,
+        _CAPABILITY_EXCLUSION_PATTERNS[
+            capability
+        ],
+    )
+
+
+def _detect_excluded_capabilities(
+    task_goal: str,
+    /,
+) -> frozenset[AgentRequiredCapability]:
+    """一次性提取task_goal明确排除的全部能力。"""
+
+    return frozenset(
+        capability
+        for capability in CAPABILITY_TO_TOOL
+        if _capability_is_excluded(
+            capability=capability,
+            task_goal=task_goal,
+        )
     )
 
 
@@ -690,32 +759,46 @@ def _detect_required_capabilities(
         request.task_goal
     )
 
+    excluded_capabilities = (
+        _detect_excluded_capabilities(
+            task_goal
+        )
+    )
+
     capabilities = tuple(
         capability
         for capability
         in CAPABILITY_TO_TOOL
-        if (
-            _vision_observation_is_required(
-                request=request,
-                normalized_task_goal=task_goal,
+        if capability not in excluded_capabilities
+        and (
+                _vision_observation_is_required(
+                    request=request,
+                    normalized_task_goal=task_goal,
+                )
+                if capability
+                == "vision_observation"
+                else _capability_is_required(
+                    capability=capability,
+                    task_goal=task_goal,
+                )
             )
-            if capability
-            == "vision_observation"
-            else _capability_is_required(
-                capability=capability,
-                task_goal=task_goal,
-            )
-        )
     )
 
     if capabilities:
         return capabilities
 
-    # 显式task_goal没有命中专用能力时，
-    # 仍按照诊断接口的默认职责使用知识库证据。
+    # 显式task_goal没有命中专用能力时，通常仍按照诊断接口的
+    # 默认职责使用知识库证据。但如果用户已经明确排除知识库，
+    # 不能通过默认分支重新开放search_knowledge。
     #
     # 提示注入和高风险请求会在下一阶段先被
     # 安全分类器拦截，不会落入这个默认分支。
+    if (
+        "knowledge_evidence"
+        in excluded_capabilities
+    ):
+        return ()
+
     return (
         "knowledge_evidence",
     )
@@ -806,6 +889,27 @@ class AgentToolPolicy:
                 request
             )
         )
+
+        # task_goal明确排除了所有能够满足当前请求的只读能力。
+        #
+        # 这里必须在进入Planner之前结束，不能把空集合再次解释为
+        # “默认检索知识库”。missing_information只说明用户需要
+        # 明确一个未排除的诊断目标，不会把任何被排除能力写成缺失项。
+        if not capabilities:
+            return AgentToolPolicyDecision(
+                disposition="abstained",
+                required_capabilities=(),
+                allowed_tool_names=(),
+                reason_codes=(
+                    "no_safe_tool_required",
+                ),
+                public_message=(
+                    "当前任务没有保留可执行的只读诊断能力"
+                ),
+                missing_information=(
+                    "请明确至少一项未被排除的只读诊断目标",
+                ),
+            )
 
         requires_vision = (
             "vision_observation"

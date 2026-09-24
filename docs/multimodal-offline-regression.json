@@ -45,9 +45,9 @@
       "safety_requirement_count": 91,
       "passed_safety_requirement_count": 91,
       "safety_requirement_pass_rate": 1.0,
-      "mean_latency_ms": 9.105166666677178,
-      "p50_latency_ms": 7.823149999921952,
-      "p95_latency_ms": 18.72286499988149,
+      "mean_latency_ms": 8.063263333800327,
+      "p50_latency_ms": 6.494850000308361,
+      "p95_latency_ms": 18.11852500068198,
       "cost_estimated_scenario_count": 0,
       "cost_estimation_coverage": 0.0,
       "known_total_estimated_cost_usd": null,
@@ -178,7 +178,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 25.744700000359444,
+        "latency_ms": 22.64650000142865,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -310,7 +310,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.820899999842368,
+        "latency_ms": 9.5593000005465,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -440,7 +440,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 8.364199999959965,
+        "latency_ms": 8.399300000746734,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -572,7 +572,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.14590000006865,
+        "latency_ms": 7.4830000012298115,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -704,7 +704,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 9.650700000293,
+        "latency_ms": 7.047699997201562,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -833,7 +833,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 8.840299999974377,
+        "latency_ms": 6.2726000032853335,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -945,7 +945,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 8.71019999976852,
+        "latency_ms": 6.431699999666307,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1058,7 +1058,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.825400000001537,
+        "latency_ms": 6.934400000318419,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1128,7 +1128,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 18.155100000058155,
+        "latency_ms": 17.284100002143532,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1198,7 +1198,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.235900000068796,
+        "latency_ms": 6.054299999959767,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1268,7 +1268,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 18.11699999962002,
+        "latency_ms": 15.956299997924361,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1338,7 +1338,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.539899999756017,
+        "latency_ms": 6.082100000639912,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1449,7 +1449,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 19.187399999736954,
+        "latency_ms": 18.418899999232963,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1560,7 +1560,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.735500000308093,
+        "latency_ms": 6.558000000950415,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1671,7 +1671,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 17.830100000082894,
+        "latency_ms": 17.75140000245301,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1767,7 +1767,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 9.88069999993968,
+        "latency_ms": 6.695200005196966,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1826,7 +1826,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 1.4218999999684456,
+        "latency_ms": 1.3480000052368268,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1885,7 +1885,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 4.51840000005177,
+        "latency_ms": 5.008300002373289,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -1955,7 +1955,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 9.489300000041112,
+        "latency_ms": 6.2040000048000365,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2025,7 +2025,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 17.985800000133167,
+        "latency_ms": 16.401000000769272,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2086,7 +2086,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 1.9186999998055398,
+        "latency_ms": 1.8947999997180887,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2149,7 +2149,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 6.0024999997949635,
+        "latency_ms": 6.063200002245139,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2240,7 +2240,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 9.737600000335078,
+        "latency_ms": 7.574900002509821,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2331,7 +2331,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.90210000013758,
+        "latency_ms": 6.8542000008164905,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2419,7 +2419,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.4491000000307395,
+        "latency_ms": 5.877800002053846,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2505,7 +2505,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 5.6863999998313375,
+        "latency_ms": 5.912299995543435,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2574,7 +2574,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 1.3014999999541033,
+        "latency_ms": 1.046899997163564,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2643,7 +2643,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 1.3610000000880973,
+        "latency_ms": 0.8670999959576875,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2729,7 +2729,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 7.587000000057742,
+        "latency_ms": 6.064299996069167,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2793,7 +2793,7 @@
             "failure_reason": null
           }
         ],
-        "latency_ms": 1.0098000002471963,
+        "latency_ms": 1.2062999958288856,
         "cost_status": "unavailable",
         "estimated_cost_usd": null,
         "cost_note": "离线回归使用固定Fake结果，没有调用可计费外部模型",
@@ -2961,7 +2961,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.15729999995528487,
+              "duration_ms": 0.15619999612681568,
               "error_code": null
             },
             {
@@ -2971,7 +2971,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.08670000033816905,
+              "duration_ms": 0.14789999841013923,
               "error_code": null
             }
           ],
@@ -3196,7 +3196,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.12340000012045493,
+              "duration_ms": 0.12350000179139897,
               "error_code": null
             },
             {
@@ -3206,7 +3206,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.06260000009206124,
+              "duration_ms": 0.06439999560825527,
               "error_code": null
             },
             {
@@ -3216,7 +3216,7 @@
               "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
               "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
               "status": "success",
-              "duration_ms": 0.0617999999121821,
+              "duration_ms": 0.061599996115546674,
               "error_code": null
             }
           ],
@@ -3480,7 +3480,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.13400000034380355,
+              "duration_ms": 0.20640000002458692,
               "error_code": null
             },
             {
@@ -3490,7 +3490,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.060599999869737076,
+              "duration_ms": 0.06900000153109431,
               "error_code": null
             },
             {
@@ -3500,7 +3500,7 @@
               "input_summary": "生成测试草案；objective_chars=21；evidence_count=2",
               "result_summary": "生成待人工批准测试草案；step_count=3；evidence_count=2；draft_only=true；requires_human_approval=true",
               "status": "success",
-              "duration_ms": 0.09390000013809185,
+              "duration_ms": 0.21289999858709052,
               "error_code": null
             }
           ],
@@ -3800,7 +3800,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.11730000005627517,
+              "duration_ms": 0.12379999679978937,
               "error_code": null
             },
             {
@@ -3810,7 +3810,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.06659999962721486,
+              "duration_ms": 0.06310000026132911,
               "error_code": null
             },
             {
@@ -3820,7 +3820,7 @@
               "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
               "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
               "status": "success",
-              "duration_ms": 0.038299999687296804,
+              "duration_ms": 0.0411000000895001,
               "error_code": null
             }
           ],
@@ -4084,7 +4084,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=0；indicator_count=3；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.13969999963592272,
+              "duration_ms": 0.1066999975591898,
               "error_code": null
             },
             {
@@ -4094,7 +4094,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.08479999996779952,
+              "duration_ms": 0.06430000212276354,
               "error_code": null
             },
             {
@@ -4104,7 +4104,7 @@
               "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
               "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
               "status": "success",
-              "duration_ms": 0.05140000030223746,
+              "duration_ms": 0.03819999983534217,
               "error_code": null
             }
           ],
@@ -4368,7 +4368,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=0；indicator_count=3；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.17390000039085862,
+              "duration_ms": 0.10200000542681664,
               "error_code": null
             },
             {
@@ -4378,7 +4378,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.0832000000627886,
+              "duration_ms": 0.062200000684242696,
               "error_code": null
             }
           ],
@@ -4601,7 +4601,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=2；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.10299999985363684,
+              "duration_ms": 0.10250000195810571,
               "error_code": null
             },
             {
@@ -4611,7 +4611,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回1条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.048799999603943434,
+              "duration_ms": 0.04939999780617654,
               "error_code": null
             }
           ],
@@ -4824,7 +4824,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=2；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.11089999998148414,
+              "duration_ms": 0.12070000229869038,
               "error_code": null
             },
             {
@@ -4834,7 +4834,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回1条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.06880000000819564,
+              "duration_ms": 0.045199994929134846,
               "error_code": null
             },
             {
@@ -4844,7 +4844,7 @@
               "input_summary": "生成测试草案；objective_chars=21；evidence_count=1",
               "result_summary": "生成待人工批准测试草案；step_count=3；evidence_count=1；draft_only=true；requires_human_approval=true",
               "status": "success",
-              "duration_ms": 0.08170000000973232,
+              "duration_ms": 0.06489999941550195,
               "error_code": null
             }
           ],
@@ -5097,7 +5097,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.199700000393932,
+              "duration_ms": 0.20950000180164352,
               "error_code": null
             }
           ],
@@ -5257,7 +5257,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.09940000018104911,
+              "duration_ms": 0.08930000331019983,
               "error_code": null
             }
           ],
@@ -5417,7 +5417,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.22710000030201627,
+              "duration_ms": 0.20670000230893493,
               "error_code": null
             }
           ],
@@ -5577,7 +5577,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.09279999994760146,
+              "duration_ms": 0.09169999975711107,
               "error_code": null
             }
           ],
@@ -5766,7 +5766,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.20629999971788493,
+              "duration_ms": 0.2193000036641024,
               "error_code": null
             },
             {
@@ -5776,7 +5776,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.23079999982655863,
+              "duration_ms": 0.06500000017695129,
               "error_code": null
             }
           ],
@@ -5992,7 +5992,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.09589999990566866,
+              "duration_ms": 0.08830000297166407,
               "error_code": null
             },
             {
@@ -6002,7 +6002,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.05979999968985794,
+              "duration_ms": 0.05939999391557649,
               "error_code": null
             }
           ],
@@ -6218,7 +6218,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.20589999985531904,
+              "duration_ms": 0.21069999638712034,
               "error_code": null
             },
             {
@@ -6228,7 +6228,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回2条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.06249999978535925,
+              "duration_ms": 0.061700004152953625,
               "error_code": null
             }
           ],
@@ -6442,7 +6442,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.14220000002751476,
+              "duration_ms": 0.09259999933419749,
               "error_code": null
             },
             {
@@ -6452,7 +6452,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "知识库返回1条已确认引用；retrieval_ms=5.000",
               "status": "success",
-              "duration_ms": 0.06419999999707215,
+              "duration_ms": 0.04479999915929511,
               "error_code": null
             }
           ],
@@ -6791,7 +6791,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.15239999993355013,
+              "duration_ms": 0.10889999975915998,
               "error_code": null
             }
           ],
@@ -6951,7 +6951,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=unusable；image_quality=unusable；observation_count=0；indicator_count=0；requires_human_check=true",
               "status": "success",
-              "duration_ms": 0.20240000003468595,
+              "duration_ms": 0.20500000391621143,
               "error_code": null
             }
           ],
@@ -7112,7 +7112,7 @@
               "input_summary": "知识库检索；query_chars=29；top_k=3",
               "result_summary": "status=empty；error_code=empty_result；message=工具没有返回可用结果",
               "status": "empty",
-              "duration_ms": 0.017100000150094274,
+              "duration_ms": 0.01700000575510785,
               "error_code": "empty_result"
             }
           ],
@@ -7237,7 +7237,7 @@
               "input_summary": "读取脱敏模拟遥测；robot_id=robot-999",
               "result_summary": "取得脱敏模拟遥测；robot_id=robot-999；state=offline；fault_count=0",
               "status": "success",
-              "duration_ms": 0.08389999993596575,
+              "duration_ms": 0.07179999374784529,
               "error_code": null
             }
           ],
@@ -7383,7 +7383,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.22209999997357954,
+              "duration_ms": 0.11559999984456226,
               "error_code": null
             },
             {
@@ -7393,7 +7393,7 @@
               "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
               "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
               "status": "success",
-              "duration_ms": 0.04099999978279811,
+              "duration_ms": 0.0394000016967766,
               "error_code": null
             }
           ],
@@ -7608,7 +7608,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.18929999987449264,
+              "duration_ms": 0.10740000288933516,
               "error_code": null
             },
             {
@@ -7618,7 +7618,7 @@
               "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
               "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
               "status": "success",
-              "duration_ms": 0.08400000024266774,
+              "duration_ms": 0.03890000516548753,
               "error_code": null
             }
           ],
@@ -7833,7 +7833,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=0；indicator_count=3；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.09610000006432529,
+              "duration_ms": 0.09180000051856041,
               "error_code": null
             }
           ],
@@ -8010,7 +8010,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=2；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.08070000012594392,
+              "duration_ms": 0.09270000009564683,
               "error_code": null
             }
           ],
@@ -8337,7 +8337,7 @@
               "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=25",
               "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=2；indicator_count=0；requires_human_check=false",
               "status": "success",
-              "duration_ms": 0.0928999997995561,
+              "duration_ms": 0.08800000068731606,
               "error_code": null
             }
           ],

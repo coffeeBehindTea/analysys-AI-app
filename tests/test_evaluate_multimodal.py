@@ -34,6 +34,8 @@ from scripts.evaluate_multimodal import (
     DEFAULT_SCENARIOS_PATH,
     DEFAULT_TIMEOUT_SECONDS,
     PROJECT_ROOT,
+    WEEK8_REAL_MODEL_SCENARIO_IDS,
+    WEEK8_REAL_MODEL_SAMPLE_VERSION,
     build_fix_history,
     build_trace_targets,
     parse_args,
@@ -41,6 +43,7 @@ from scripts.evaluate_multimodal import (
     render_markdown_report,
     resolve_project_path,
     run_real_evaluation,
+    select_scenarios,
     write_evaluation_artifacts,
 )
 
@@ -261,6 +264,7 @@ def test_parse_args_uses_documented_defaults() -> None:
     assert args.timeout_seconds == (
         DEFAULT_TIMEOUT_SECONDS
     )
+    assert args.week8_sample is False
     assert args.enable_llm_judge is False
     assert args.llm_judge_timeout_seconds == 30.0
 
@@ -283,6 +287,131 @@ def test_parse_args_enables_auxiliary_llm_judge() -> None:
 
     assert args.enable_llm_judge is True
     assert args.llm_judge_timeout_seconds == 15.5
+
+
+def test_parse_args_enables_week8_sample() -> None:
+    """显式开关应选择固定Week 8真实模型抽样。"""
+
+    args = parse_args(["--week8-sample"])
+
+    assert args.week8_sample is True
+
+
+def test_week8_sample_covers_required_real_model_categories(
+) -> None:
+    """固定10条样本必须覆盖任务3要求的场景类型。
+
+    被测试对象是WEEK8_REAL_MODEL_SCENARIO_IDS和
+    select_scenarios()。测试加载真实Gold JSONL，但不发送HTTP
+    请求，也不调用模型。预期选择结果恰好10条、编号唯一，
+    至少5条携带图片，并覆盖正常、低质量、无证据、图文冲突
+    和高风险五类，同时包含三条既有脱敏轨迹目标。
+    """
+
+    loaded = tuple(
+        script_module
+        .load_multimodal_agent_evaluation_scenarios(
+            PROJECT_ROOT / DEFAULT_SCENARIOS_PATH
+        )
+    )
+    selected = select_scenarios(
+        scenarios=loaded,
+        scenario_ids=(
+            WEEK8_REAL_MODEL_SCENARIO_IDS
+        ),
+    )
+
+    assert WEEK8_REAL_MODEL_SAMPLE_VERSION == (
+        "week8-real-model-sample-v1"
+    )
+    assert len(selected) == 10
+    assert tuple(
+        scenario.scenario_id
+        for scenario in selected
+    ) == WEEK8_REAL_MODEL_SCENARIO_IDS
+    assert len(
+        set(WEEK8_REAL_MODEL_SCENARIO_IDS)
+    ) == 10
+    assert sum(
+        bool(scenario.images)
+        for scenario in selected
+    ) >= 5
+    assert {
+        "normal_image",
+        "noisy_or_low_quality",
+        "missing_or_unanswerable",
+        "image_log_conflict",
+        "prompt_injection_or_high_risk",
+    }.issubset({
+        scenario.category
+        for scenario in selected
+    })
+    assert {
+        "multimodal-agent-001",
+        "multimodal-agent-023",
+        "multimodal-agent-030",
+    }.issubset(set(WEEK8_REAL_MODEL_SCENARIO_IDS))
+
+
+def test_select_scenarios_preserves_requested_order(
+) -> None:
+    """选择器必须按请求编号顺序返回原场景对象。"""
+
+    first = SimpleNamespace(
+        scenario_id="multimodal-agent-001"
+    )
+    second = SimpleNamespace(
+        scenario_id="multimodal-agent-002"
+    )
+
+    selected = select_scenarios(
+        scenarios=(first, second),  # type: ignore[arg-type]
+        scenario_ids=(
+            "multimodal-agent-002",
+            "multimodal-agent-001",
+        ),
+    )
+
+    assert selected == (second, first)
+
+
+@pytest.mark.parametrize(
+    ("scenario_ids", "message"),
+    (
+        (
+            (
+                "multimodal-agent-001",
+                "multimodal-agent-001",
+            ),
+            "不能重复",
+        ),
+        (
+            ("multimodal-agent-999",),
+            "未知场景",
+        ),
+        (("   ",), "不能为空"),
+    ),
+)
+def test_select_scenarios_rejects_invalid_ids(
+    scenario_ids: tuple[str, ...],
+    message: str,
+) -> None:
+    """选择器应在真实请求前拒绝重复、未知或空编号。"""
+
+    scenarios = (
+        SimpleNamespace(
+            scenario_id="multimodal-agent-001"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=message,
+    ):
+        select_scenarios(
+            scenarios=scenarios,  # type: ignore[arg-type]
+            scenario_ids=scenario_ids,
+        )
 
 
 def test_resolve_project_path_anchors_relative_path() -> None:
@@ -370,8 +499,42 @@ def test_render_markdown_contains_required_sections_without_time(
     assert "## 7. 修正记录" in markdown
     assert "source_image_sha256" in markdown
     assert "来源完整性指纹" in markdown
+    assert "LLM-as-judge 当前未启用" in markdown
     assert "generated_at" not in markdown
     assert "生成时间" not in markdown
+
+
+def test_render_markdown_reports_enabled_judge_as_auxiliary(
+) -> None:
+    """启用辅助Judge后，报告必须如实说明用途而非写成未启用。
+
+    被测试模块是render_markdown_report()。测试从稳定报告对象
+    复制一份Judge评测数为2的指标，再渲染Markdown。预期报告
+    写明本批次辅助复核了2个场景，同时保留Judge不能改变
+    确定性passed结果的边界说明。
+    """
+
+    report = make_report()
+    report_with_judge = report.model_copy(
+        update={
+            "metrics": report.metrics.model_copy(
+                update={
+                    "llm_judge_evaluated_count": 2,
+                    "llm_judge_pass_count": 1,
+                    "llm_judge_pass_rate": 0.5,
+                }
+            ),
+            "llm_judge_role": "仅作为辅助指标",
+        }
+    )
+
+    markdown = render_markdown_report(
+        report_with_judge
+    )
+
+    assert "LLM-as-judge 本批次辅助复核了 2 个" in markdown
+    assert "不能改变确定性 passed 结果" in markdown
+    assert "LLM-as-judge 当前未启用" not in markdown
 
 
 @pytest.mark.filterwarnings(
@@ -519,6 +682,7 @@ async def test_run_real_evaluation_assembles_dependencies(
         settings=make_settings(),
         api_url=DEFAULT_API_URL,
         timeout_seconds=45.0,
+        minimum_scenario_count=10,
     )
 
     assert result is expected_execution
@@ -548,6 +712,9 @@ async def test_run_real_evaluation_assembles_dependencies(
     assert call_arguments[
         "visual_equivalence_judge"
     ] is None
+    assert call_arguments[
+        "minimum_scenario_count"
+    ] == 10
     assert tuple(call_arguments["trace_targets"]) == (
         "multimodal-agent-001",
         "multimodal-agent-023",

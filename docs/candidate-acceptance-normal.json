@@ -1,0 +1,270 @@
+{
+  "acceptance_version": "candidate-acceptance-v1",
+  "scenario_id": "candidate-normal-network-panel",
+  "execution_mode": "real_model_docker",
+  "expected_outcome": {
+    "diagnosis_status": "completed",
+    "tool_sequence": [
+      "analyze_robot_image",
+      "search_knowledge",
+      "get_robot_telemetry"
+    ],
+    "minimum_citation_count": 1
+  },
+  "observed_outcome": {
+    "request_id": "7deac7cb-c61f-4ab7-8c2d-06c386e67d80",
+    "session_id": "21e8674d-c44d-4fec-855b-2a1131680bcd",
+    "diagnosis_status": "completed",
+    "execution_state": "completed",
+    "termination_reason": "planner_finished",
+    "finish_reason": "task_completed",
+    "tool_sequence": [
+      "analyze_robot_image",
+      "search_knowledge",
+      "get_robot_telemetry"
+    ],
+    "citation_count": 2,
+    "vision_observation_count": 1,
+    "telemetry_observation_count": 1
+  },
+  "checks": {
+    "response_contract_valid": true,
+    "completed_status_correct": true,
+    "planner_finished": true,
+    "task_completed": true,
+    "tool_sequence_correct": true,
+    "citations_present": true,
+    "vision_observation_present": true,
+    "telemetry_observation_present": true
+  },
+  "passed": true,
+  "persisted_session": {
+    "schema_version": "diagnostic-session-v1",
+    "session_id": "21e8674d-c44d-4fec-855b-2a1131680bcd",
+    "request_id": "7deac7cb-c61f-4ab7-8c2d-06c386e67d80",
+    "request_summary": {
+      "robot_id": "robot-001",
+      "symptom_summary": "网络已连接但机器人保持暂停",
+      "task_goal_summary": "读取面板、检索网络恢复条件并读取robot-001模拟遥测，核对当前状态",
+      "log_excerpt_sha256": "78922e36a74a7d795bb01d4a871e0b3603537386e70f4b4a35adbae02f126b0d",
+      "log_excerpt_char_count": 51,
+      "image_count": 1
+    },
+    "status": "completed",
+    "execution_state": "completed",
+    "termination_reason": "planner_finished",
+    "finish_reason": "task_completed",
+    "diagnosis": {
+      "prompt_version": "agent-tool-calling-v8",
+      "gate_version": "agent-confirmed-evidence-v1",
+      "status": "completed",
+      "evidence": [
+        {
+          "chunk_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+          "document_id": "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+          "source_file": "仓储机器人故障说明.txt",
+          "page_or_section": "section: ERR-NET-4001",
+          "rank": 1,
+          "rrf_score": 0.03252247488101534,
+          "vector_similarity": 0.6398411393165588,
+          "excerpt": "故障代码 (ErrorCode)\nERR-NET-4001\n故障名称\n心跳包超时 (Heartbeat Loss)\n触发条件 / 现象\nAGV 与 5G/Wi-Fi 调度服务器失去通信通信连通性超 1500ms。\n可能原因 (Root Cause)\n1. 仓库 AP 漫游切换失败；2. 信号盲区或高频电磁干扰；3. 车载网关模块断电。\n排查与修复步骤 (Action Steps)\n1. 观察机器人是否自动进入原地制动状态；2. 检查现场 Wi-Fi 信号强度（信噪比 SNR）；3. 手持终端通过局域网直连或重启车载无线网关。\n严重等级\n紧急 (Fatal)"
+        },
+        {
+          "chunk_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+          "document_id": "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+          "source_file": "京东无人仓场景-仓储机器人测试规程与判定标准.md",
+          "page_or_section": "section: 京东无人仓公开场景下的仓储机器人测试规程与判定标准 > 10. 网络与调度测试 > 10.1 TEST-NET-001 调度心跳中断",
+          "rank": 2,
+          "rrf_score": 0.03252247488101534,
+          "vector_similarity": 0.5841712355613708,
+          "excerpt": "### 10.1 TEST-NET-001 调度心跳中断\n\n#### 测试目的\n\n验证机器人与 RCS/RMS 的通信中断超过 1500 ms 后进入安全状态。\n\n#### 测试步骤\n\n1. 下发一项无载移动任务。\n2. 使用故障注入工具中断机器人与调度服务器的通信。\n3. 保持中断超过 1500 ms。\n4. 记录车体动作、本地告警和服务器状态。\n5. 恢复网络，但不下发人工恢复命令。\n\n#### 通过标准\n\n- 超过 1500 ms 后上报或本地记录 `ERR-NET-4001`；\n- 机器人进入原地制动或预先批准的安全停车状态；\n- 通信恢复后不自动继续旧任务；\n- RCS/RMS 完成状态核对并下发恢复命令后才能继续运行。"
+        }
+      ],
+      "possible_causes": [
+        {
+          "description": "ERR-NET-4001 为心跳包超时（Heartbeat Loss）：AGV 与 5G/Wi-Fi 调度服务器失去通信连通性超过 1500ms 后触发。可能根因包括仓库 AP 漫游切换失败、信号盲区或高频电磁干扰、车载网关模块断电。",
+          "evidence_chunk_ids": [
+            "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+          ]
+        },
+        {
+          "description": "通信中断超过 1500ms 后机器人进入原地制动或预先批准的安全停车状态，且通信恢复后不会自动继续旧任务，必须由 RCS/RMS 完成状态核对并下发恢复命令后才能继续运行——这解释了“网络已连接但机器人保持暂停”的现象。",
+          "evidence_chunk_ids": [
+            "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+          ]
+        }
+      ],
+      "next_checks": [
+        {
+          "description": "观察机器人是否处于原地制动/安全停车状态，并确认其未自动恢复旧任务（当前模拟遥测显示 operational_state=paused、speed_mps=0.0、current_task_id=task-demo-1001，与安全停车后不自动续跑一致）。",
+          "evidence_chunk_ids": [
+            "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+            "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+          ],
+          "risk_level": "medium",
+          "requires_qualified_person": false
+        },
+        {
+          "description": "检查现场 Wi-Fi 信号强度（信噪比 SNR），排查 AP 漫游切换失败、信号盲区或高频电磁干扰。",
+          "evidence_chunk_ids": [
+            "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+          ],
+          "risk_level": "medium",
+          "requires_qualified_person": false
+        },
+        {
+          "description": "由 RCS/RMS 完成状态核对并下发恢复命令后，方可让机器人继续运行；如需通过手持终端局域网直连或重启车载无线网关，须由有资质人员执行。",
+          "evidence_chunk_ids": [
+            "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+            "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003"
+          ],
+          "risk_level": "high",
+          "requires_qualified_person": true
+        }
+      ],
+      "risk_level": "high",
+      "missing_information": [],
+      "abstained": false
+    },
+    "tool_events": [
+      {
+        "step_id": 1,
+        "event_type": "tool_execution",
+        "tool_name": "analyze_robot_image",
+        "input_summary": "分析请求级图片；image_ref=image_001；analysis_goal_chars=21",
+        "result_summary": "取得结构化视觉观察；status=completed；image_quality=clear；observation_count=3；indicator_count=3；requires_human_check=true",
+        "status": "success",
+        "duration_ms": 4547.12683400021,
+        "error_code": null
+      },
+      {
+        "step_id": 2,
+        "event_type": "tool_execution",
+        "tool_name": "search_knowledge",
+        "input_summary": "知识库检索；query_chars=33；top_k=3",
+        "result_summary": "知识库返回2条已确认引用；retrieval_ms=1360.506",
+        "status": "success",
+        "duration_ms": 1360.6467599997814,
+        "error_code": null
+      },
+      {
+        "step_id": 3,
+        "event_type": "tool_execution",
+        "tool_name": "get_robot_telemetry",
+        "input_summary": "读取脱敏模拟遥测；robot_id=robot-001",
+        "result_summary": "取得脱敏模拟遥测；robot_id=robot-001；state=paused；fault_count=1",
+        "status": "success",
+        "duration_ms": 0.1060039999174478,
+        "error_code": null
+      }
+    ],
+    "vision_observations": [
+      {
+        "step_id": 1,
+        "image_ref": "image_001",
+        "observation": {
+          "status": "completed",
+          "image_quality": "clear",
+          "observations": [
+            {
+              "description": "画面为深色圆角面板，浅色背景，面板标题为“ROBOT STATUS PANEL”，文字清晰可辨。",
+              "category": "visible_text",
+              "confidence": "high",
+              "region": "整幅图像上半部"
+            },
+            {
+              "description": "面板内以左列标签、右列取值的形式排列三行状态信息：FAULT CODE、NETWORK、TASK。",
+              "category": "visible_condition",
+              "confidence": "high",
+              "region": "面板中部"
+            },
+            {
+              "description": "面板底部有一行较小的灰蓝色文字“SYNTHETIC TRAINING SAMPLE”。",
+              "category": "visible_text",
+              "confidence": "high",
+              "region": "面板底部左侧"
+            }
+          ],
+          "visible_indicators": [
+            {
+              "label": "FAULT CODE",
+              "observed_state": "ERR-NET-4001",
+              "confidence": "high",
+              "region": "面板第一行右侧"
+            },
+            {
+              "label": "NETWORK",
+              "observed_state": "CONNECTED",
+              "confidence": "high",
+              "region": "面板第二行右侧"
+            },
+            {
+              "label": "TASK",
+              "observed_state": "PAUSED",
+              "confidence": "high",
+              "region": "面板第三行右侧"
+            }
+          ],
+          "uncertain_items": [
+            "面板底部标注“SYNTHETIC TRAINING SAMPLE”，因此无法确认这些取值是否来自真实设备的实时状态画面。",
+            "图中未显示时间戳、设备编号或数据来源信息。"
+          ],
+          "untrusted_text_detected": false,
+          "untrusted_text_notes": [],
+          "requires_human_check": true,
+          "human_check_reasons": [
+            "面板自称为合成训练样本，显示的故障码、网络状态与任务状态是否对应真实设备现场需人工核实。"
+          ],
+          "source": "vision_model",
+          "source_image_sha256": "992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+          "prompt_version": "robot-vision-observation-v2",
+          "model_name": "deepseek-v4-flash-vision-exp"
+        }
+      }
+    ],
+    "telemetry_observations": [
+      {
+        "robot_id": "robot-001",
+        "observed_at": "2026-09-22T10:04:49.042154Z",
+        "location": "warehouse-demo/zone-a/aisle-07/node-14",
+        "battery_percent": 42.5,
+        "operational_state": "paused",
+        "current_task_id": "task-demo-1001",
+        "active_fault_codes": [
+          "ERR-NET-4001"
+        ],
+        "speed_mps": 0,
+        "network_connected": true,
+        "source": "simulated_memory"
+      }
+    ],
+    "test_case_drafts": [],
+    "evidence_coverage": {
+      "confirmed_source_ids": [
+        "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367",
+        "knowledge:5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80",
+        "knowledge:dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652",
+        "telemetry:simulated_memory:robot-001"
+      ],
+      "covered_evidence_ids": [
+        "vision:992426e7ba0bcb7683ed966081df37caf23475f7d91bc13fc93333b6a89d3367:call_00_qFzEAfpM74VubgwCJ8pa6174",
+        "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022",
+        "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+        "telemetry:robot-001:2026-09-22T10:04:49.042154+00:00"
+      ],
+      "cited_chunk_ids": [
+        "dd18de8c04d80f7805a8f70ad6c24857d0df55df8009dec2e3371c3ee50fc652:000003",
+        "5b11fafd10c2414a65e1fd6eed8d7a295ee707ebaa0da89e6470841887b7ab80:000022"
+      ]
+    },
+    "metrics": {
+      "total_duration_ms": 13660.514790999969,
+      "tool_step_count": 3,
+      "failed_tool_count": 0,
+      "failed_tool_names": [],
+      "confirmed_source_count": 4,
+      "covered_evidence_count": 4,
+      "citation_count": 2
+    }
+  }
+}

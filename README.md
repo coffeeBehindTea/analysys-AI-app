@@ -1266,23 +1266,6 @@ Planner 超时、无效结构、最大步数、重复调用、连续工具失败
 
 ## 11. 数据与版本控制规则
 
-以下内容已通过 `.gitignore` 排除：
-
-```text
-.env
-data/source/*
-data/processed/
-chroma_data/
-chroma_data.*/
-__pycache__/
-.pytest_cache/
-要求.txt
-week*验收.txt
-week[0-9]*.txt
-docs中的原始JSON和含长原文评测报告
-docs/multimodal-evaluation-v*.md
-```
-
 目录职责：
 
 | 路径 | 职责 | 是否提交 |

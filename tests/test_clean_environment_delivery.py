@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENV_TEMPLATE_PATH = PROJECT_ROOT / ".env.example"
 DOCKERIGNORE_PATH = PROJECT_ROOT / ".dockerignore"
 COMPOSE_PATH = PROJECT_ROOT / "compose.yaml"
-README_PATH = PROJECT_ROOT / "README.md"
+README_PATH = PROJECT_ROOT / "ch_README.md"
 
 
 # 这些规则共同保证密钥和本地运行数据不会进入Docker构建上下文。
